@@ -1,0 +1,63 @@
+# =============================================================================
+# Redis ACL (Access Control List) Configuration
+# User-based security for Redis
+# =============================================================================
+
+# Disable the default user for security
+user default off
+
+# =============================================================================
+# APPLICATION USER
+# =============================================================================
+# Application user with limited permissions
+user asoud_app on >asoud_app_password_change_me
+user asoud_app ~* 
+user asoud_app &*
+user asoud_app -@all +@read +@write +@string +@list +@set +@hash +@stream +@connection +@transaction
+user asoud_app -flushdb -flushall -shutdown -debug -eval -script
+
+# =============================================================================
+# ADMIN USER
+# =============================================================================
+# Admin user with full access (for maintenance)
+user admin on >admin_strong_password_change_me
+user admin ~*
+user admin &*
+user admin +@all
+
+# =============================================================================
+# MONITORING USER
+# =============================================================================
+# Read-only monitoring user
+user monitor on >monitor_password_change_me
+user monitor ~*
+user monitor &*
+user monitor +@read +info +ping +client +config|get +slowlog +memory +latency
+
+# =============================================================================
+# SESSION USER
+# =============================================================================
+# Dedicated user for Django sessions
+user sessions on >sessions_password_change_me
+user sessions ~session:*
+user sessions &*
+user sessions +@read +@write +@string +@connection +expire +ttl +del
+
+# =============================================================================
+# CACHE USER
+# =============================================================================
+# Dedicated user for Django cache
+user cache on >cache_password_change_me
+user cache ~cache:*
+user cache &*
+user cache +@read +@write +@string +@hash +@connection +expire +ttl +del
+
+# =============================================================================
+# SECURITY NOTES:
+# 
+# 1. Default user is disabled for security
+# 2. Each service has its own user with minimal required permissions
+# 3. Passwords should be changed from defaults
+# 4. Key patterns (~) limit access to specific prefixes
+# 5. Command categories (+@read, +@write) provide granular control
+# =============================================================================

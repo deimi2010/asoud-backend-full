@@ -1,0 +1,207 @@
+name: asoud-production
+
+# Canonical production runtime. PostgreSQL and Redis are externally managed;
+# this file never starts disposable data services and never runs migrations at
+# application startup. Image variables must be immutable digest references.
+
+x-backend-environment: &backend-environment
+  DJANGO_SETTINGS_MODULE: config.settings.production
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?set production host names}
+  CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?set HTTPS origins}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set HTTPS origins}
+  DATABASE_NAME: ${DATABASE_NAME:?set managed database name}
+  DATABASE_USERNAME: ${DATABASE_USERNAME:?set managed database user}
+  DATABASE_HOST: ${DATABASE_HOST:?set managed database host}
+  DATABASE_PORT: ${DATABASE_PORT:-5432}
+  DATABASE_SSLMODE: ${DATABASE_SSLMODE:-require}
+  REDIS_URL_FILE: /run/secrets/redis_url
+  DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+  DATABASE_PASSWORD_FILE: /run/secrets/database_password
+  ASOUD_RATE_LIMIT_KEY_SECRET_FILE: /run/secrets/rate_limit_key
+  SMS_API_FILE: /run/secrets/sms_api
+  ZARINPAL_MERCHANT_ID_FILE: /run/secrets/zarinpal_merchant_id
+  ASOUD_RATE_LIMIT_ENABLED: "true"
+  ASOUD_TRUSTED_PROXY_CIDRS: 172.31.0.0/24
+  ASOUD_RATE_PIN_CREATE_MOBILE: ${ASOUD_RATE_PIN_CREATE_MOBILE:-5/hour}
+  ASOUD_RATE_PIN_CREATE_IP: ${ASOUD_RATE_PIN_CREATE_IP:-20/hour}
+  ASOUD_RATE_PIN_VERIFY_MOBILE: ${ASOUD_RATE_PIN_VERIFY_MOBILE:-20/hour}
+  ASOUD_RATE_PIN_VERIFY_IP: ${ASOUD_RATE_PIN_VERIFY_IP:-60/hour}
+  ASOUD_RATE_WS_TICKET_USER: ${ASOUD_RATE_WS_TICKET_USER:-20/minute}
+  ASOUD_RATE_CHAT_MEMBER_ADD_USER: ${ASOUD_RATE_CHAT_MEMBER_ADD_USER:-20/hour}
+  ASOUD_RATE_PAYMENT_MUTATION_USER: ${ASOUD_RATE_PAYMENT_MUTATION_USER:-10/minute}
+  ASOUD_RATE_UPLOAD_USER: ${ASOUD_RATE_UPLOAD_USER:-60/hour}
+  ASOUD_RATE_ANONYMOUS_READ_IP: ${ASOUD_RATE_ANONYMOUS_READ_IP:-120/minute}
+  ASOUD_RATE_AUTHENTICATED_READ_USER: ${ASOUD_RATE_AUTHENTICATED_READ_USER:-600/minute}
+  ASOUD_RATE_REFERRAL_CREATE_USER: ${ASOUD_RATE_REFERRAL_CREATE_USER:-10/hour}
+  CHAT_GROUP_MAX_PARTICIPANTS: ${CHAT_GROUP_MAX_PARTICIPANTS:-100}
+  PAYMENT_SESSION_TTL_SECONDS: ${PAYMENT_SESSION_TTL_SECONDS:-1800}
+  DJANGO_STATIC_ROOT: /app/staticfiles
+  DJANGO_MEDIA_ROOT: /app/media
+
+x-backend-secrets: &backend-secrets
+  - django_secret_key
+  - database_password
+  - redis_url
+  - rate_limit_key
+  - sms_api
+  - zarinpal_merchant_id
+
+x-container-security: &container-security
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  backend:
+    image: ${BACKEND_IMAGE:?set an immutable backend image digest}
+    init: true
+    restart: unless-stopped
+    environment: *backend-environment
+    secrets: *backend-secrets
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8000", "config.asgi:application"]
+    expose:
+      - "8000"
+    volumes:
+      - media_data:/app/media
+      - ml_artifacts:/app/ml_artifacts
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /app/logs:size=32m,uid=10001,gid=10001,mode=0750
+    pids_limit: 256
+    <<: *container-security
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/livez', timeout=3)
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      app:
+        aliases: [backend]
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?set an immutable frontend image digest}
+    restart: unless-stopped
+    expose:
+      - "80"
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=32m,uid=101,gid=101,mode=0750
+      - /var/run:size=4m,uid=101,gid=101,mode=0750
+      - /tmp:size=16m,mode=1777
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [app]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  edge:
+    image: ${EDGE_IMAGE:?set an immutable nginx image digest}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    configs:
+      - source: edge_config
+        target: /etc/nginx/conf.d/default.conf
+        mode: 0444
+    secrets:
+      - tls_fullchain
+      - tls_private_key
+    volumes:
+      - media_data:/srv/media:ro
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=32m,uid=101,gid=101,mode=0750
+      - /var/run:size=4m,uid=101,gid=101,mode=0750
+      - /tmp:size=16m,mode=1777
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        ["CMD", "wget", "--quiet", "--no-check-certificate", "--spider", "https://127.0.0.1/livez"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [app]
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+
+  # Non-mutating pre-deploy inspection. Actual migration remains a deliberate
+  # operator step after production history/schema reconciliation is approved.
+  migration-plan:
+    image: ${BACKEND_IMAGE:?set an immutable backend image digest}
+    profiles: [operations]
+    environment: *backend-environment
+    secrets: *backend-secrets
+    command: ["python", "manage.py", "showmigrations", "--plan"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /app/logs:size=8m,uid=10001,gid=10001,mode=0750
+    <<: *container-security
+    networks: [app]
+
+configs:
+  edge_config:
+    file: ./config/nginx/production.conf
+
+secrets:
+  django_secret_key:
+    file: ${DJANGO_SECRET_KEY_FILE:?set rotated Django secret file path}
+  database_password:
+    file: ${DATABASE_PASSWORD_FILE:?set database password file path}
+  redis_url:
+    file: ${REDIS_URL_FILE:?set managed Redis URL file path}
+  rate_limit_key:
+    file: ${ASOUD_RATE_LIMIT_KEY_SECRET_FILE:?set rate-limit HMAC key file path}
+  sms_api:
+    file: ${SMS_API_FILE:?set SMS provider key file path}
+  zarinpal_merchant_id:
+    file: ${ZARINPAL_MERCHANT_ID_FILE:?set payment merchant file path}
+  tls_fullchain:
+    file: ${TLS_FULLCHAIN_FILE:?set TLS fullchain file path}
+  tls_private_key:
+    file: ${TLS_PRIVATE_KEY_FILE:?set TLS private key file path}
+
+volumes:
+  media_data:
+  ml_artifacts:
+
+networks:
+  app:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24

@@ -1,0 +1,48 @@
+# Deny by default. Only inputs explicitly copied by the final Dockerfile enter
+# the build context, so tracked env files and TLS material cannot reach a layer.
+**
+
+!requirements.txt
+!requirements-ml.txt
+!manage.py
+!entrypoint.sh
+
+!apps/
+!apps/**
+!config/
+!config/**
+!locale/
+!locale/**
+!templates/
+!templates/**
+!utils/
+!utils/**
+!tests/
+!tests/**
+!dev_migrations/
+!dev_migrations/**
+
+# Test sources are available only to the Dockerfile's isolated test target; the
+# final runtime COPY excludes them.
+**/__pycache__/
+**/*.py[cod]
+*.log
+db.sqlite3*
+media/
+static/
+staticfiles/
+
+# Defense in depth for secrets and certificate material.
+.env
+.env.*
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+ssl/
+data/
+
+.git/
+.github/
+.venv/
+graphify-out/

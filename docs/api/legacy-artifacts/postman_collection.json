@@ -1,0 +1,120 @@
+{
+  "info": {
+    "name": "ASOUD Platform API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://5.10.248.32" },
+    { "key": "token", "value": "YOUR_TOKEN" }
+  ],
+  "item": [
+    {
+      "name": "Owner Orders - List",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Token {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/owner/order/list/",
+          "host": ["{{baseUrl}}"],
+          "path": ["api","v1","owner","order","list","" ]
+        }
+      }
+    },
+    {
+      "name": "Create Order",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Token {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"items\": [{\n    \"product\": \"PRODUCT_UUID\",\n    \"quantity\": 1,\n    \"market\": \"MARKET_UUID\"\n  }],\n  \"shipping_address\": \"addr\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/user/order/create/",
+          "host": ["{{baseUrl}}"],
+          "path": ["api","v1","user","order","create","" ]
+        }
+      }
+    },
+    {
+      "name": "Payments - List",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Token {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/user/payments/",
+          "host": ["{{baseUrl}}"],
+          "path": ["api","v1","user","payments","" ]
+        }
+      }
+    },
+    {
+      "name": "Verify Payment",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Token {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"payment_id\": \"PAYMENT_UUID\",\n  \"authority\": \"AUTH_CODE\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/user/payments/verify/",
+          "host": ["{{baseUrl}}"],
+          "path": ["api","v1","user","payments","verify","" ]
+        }
+      }
+    },
+    {
+      "name": "Upload Market Logo",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Token {{token}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "logo", "type": "file", "src": "/path/to/logo.jpg" }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/owner/market/logo/{{marketId}}/",
+          "host": ["{{baseUrl}}"],
+          "path": ["api","v1","owner","market","logo","{{marketId}}", "" ]
+        }
+      }
+    },
+    {
+      "name": "Chat Rooms - List",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Token {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/chat/rooms/",
+          "host": ["{{baseUrl}}"],
+          "path": ["api","v1","chat","rooms","" ]
+        }
+      }
+    }
+  ]
+}
+
+
+
+

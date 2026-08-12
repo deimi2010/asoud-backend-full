@@ -1,0 +1,27 @@
+# These narrowly-scoped exceptions cover stdlib fixes backported after the
+# Python 3.14.6 release. Dockerfile replaces the affected modules from the
+# immutable CPython 3.14 commit below and fails the build unless the fixed code
+# is loaded. Keeping the exact binary version here prevents an exception from
+# silently carrying over to a future base-image update.
+#
+# Upstream backports included by CPython commit
+# 07efb08123ba9367a7107325adb9d5626dca1ca9:
+# - CVE-2026-11940: 79c06bd5c6afa3c440d50faf7ee1b147c8832b4c
+# - CVE-2026-11972: e86666c9dd256d52d0fbef6feb1ea4a51768fdec
+# - CVE-2026-15308: 07efb08123ba9367a7107325adb9d5626dca1ca9
+ignore:
+  - vulnerability: CVE-2026-11940
+    package:
+      name: python
+      version: 3.14.6
+      type: binary
+  - vulnerability: CVE-2026-11972
+    package:
+      name: python
+      version: 3.14.6
+      type: binary
+  - vulnerability: CVE-2026-15308
+    package:
+      name: python
+      version: 3.14.6
+      type: binary

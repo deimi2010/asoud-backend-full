@@ -1,0 +1,15 @@
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CRON_TZ=Asia/Tehran
+
+# Reconcile stale/ambiguous gateway sessions every minute. flock prevents a
+# second local invocation; the command itself remains conservative about
+# ambiguous gateway states.
+* * * * * cd /opt/asoud && flock -n /run/lock/asoud-payments.lock docker compose -f docker-compose.production.yml exec -T backend python manage.py reconcile_stale_payments --limit 100 >> /var/log/asoud-maintenance.log 2>&1
+
+# Rebuild a rolling window after late events and payment state changes.
+15 2 * * * cd /opt/asoud && flock -n /run/lock/asoud-metrics.lock docker compose -f docker-compose.production.yml exec -T backend python manage.py rebuild_analytics_daily_metrics --days 7 >> /var/log/asoud-maintenance.log 2>&1
+
+# Train all three model families weekly, after the daily metrics rebuild. The
+# management command also holds a Redis lock and activates only a better model.
+30 3 * * 1 cd /opt/asoud && flock -n /run/lock/asoud-ml-training.lock docker compose -f docker-compose.production.yml exec -T backend python manage.py train_analytics_models --activate-if-better >> /var/log/asoud-maintenance.log 2>&1

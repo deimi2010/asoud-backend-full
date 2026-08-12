@@ -1,0 +1,43 @@
+[Unit]
+Description=ASOUD Platform
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=notify
+User=www-data
+Group=www-data
+WorkingDirectory=/home/devops/projects/asoud-main-1-/asoud-main
+Environment=DJANGO_SETTINGS_MODULE=config.settings.production
+Environment=DJANGO_ALLOWED_HOSTS=api.asoud.ir,asoud.ir,localhost,127.0.0.1
+Environment=DJANGO_SECRET_KEY=your-secret-key-here
+Environment=REDIS_URL=redis://localhost:6379/0
+ExecStart=/usr/local/bin/gunicorn --config gunicorn.conf.py config.wsgi:application
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s TERM $MAINPID
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=asoud
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/devops/projects/asoud-main-1-/asoud-main
+ReadWritePaths=/tmp
+ReadWritePaths=/var/log
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Health check
+ExecStartPost=/bin/sleep 5
+ExecStartPost=/bin/curl -f http://localhost:8000/health/ || exit 1
+
+[Install]
+WantedBy=multi-user.target
+

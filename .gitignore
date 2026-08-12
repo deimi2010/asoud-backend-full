@@ -1,0 +1,33 @@
+*.pyc
+*~
+__pycache__
+venv
+db.sqlite3
+.DS_Store
+.idea
+media
+/static/
+# Migration history is production code and must always be versioned.
+rmscript
+env
+.env
+.env.*
+!.env.example
+.venv/
+*.key
+*.pem
+*.p12
+*.pfx
+ssl/
+data/ssl/
+data/nginx/ssl/
+htmlcov
+.vscode
+data/certs/
+logs/
+.devcontainer/
+*.mo
+
+# Local Graphify extraction artifacts (regenerable with `graphify extract . --code-only`)
+graphify-out/
+/schema-ci.yml

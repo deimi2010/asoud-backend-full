@@ -1,0 +1,252 @@
+from rest_framework import views
+from rest_framework.response import Response
+import logging
+
+from utils.response import ApiResponse
+from apps.core.base_views import BaseListView, BaseDetailView
+
+logger = logging.getLogger(__name__)
+
+from apps.category.models import (
+    Group, Category, SubCategory,
+    ProductGroup, ProductCategory, ProductSubCategory)
+from apps.category.serializers.user_serializers import (
+    GroupListSerializer, CategoryListSerializer, SubCategoryListSerializer,
+    ProductGroupListSerializer, ProductCategoryListSerializer,
+    ProductSubCategoryListSerializer, SubCategoryImgSerializer,
+    CategoryImgSerializer, GroupImgSerializer)
+
+
+class GroupListAPIView(BaseListView):
+    """
+    List all groups
+    """
+    permission_classes = []  # No authentication required for public data
+    
+    def get_queryset(self):
+        return Group.objects.all()
+    
+    def get_serializer_class(self):
+        return GroupListSerializer
+    
+    def get(self, request, format=None):
+        group_list = Group.objects.all()
+
+        serializer = GroupListSerializer(
+            group_list,
+            many=True,
+            context={"request": request},
+        )
+
+        success_response = ApiResponse(
+            success=True,
+            code=200,
+            data=serializer.data,
+            message='Data retrieved successfully'
+        )
+
+        return Response(success_response)
+
+
+class CategoryListAPIView(BaseListView):
+    """
+    List categories for a specific group
+    """
+    permission_classes = []  # No authentication required for public data
+    
+    def get_queryset(self):
+        group_id = self.kwargs.get('pk')
+        try:
+            group_obj = Group.objects.get(id=group_id)
+            return Category.objects.filter(group=group_obj)
+        except Group.DoesNotExist:
+            return Category.objects.none()
+    
+    def get_serializer_class(self):
+        return CategoryListSerializer
+    
+    def get(self, request, pk, format=None):
+        try:
+            group_obj = Group.objects.get(id=pk)
+        except Group.DoesNotExist:
+            return self.error_response("Group Not Found", 404)
+        
+        category_list = Category.objects.filter(group=group_obj)
+
+        serializer = CategoryListSerializer(
+            category_list,
+            many=True,
+            context={"request": request},
+        )
+
+        return self.success_response(data=serializer.data, message='Data retrieved successfully')
+
+        return Response(success_response)
+
+
+class SubCategoryListAPIView(BaseListView):
+    """
+    List subcategories for a specific category
+    """
+    permission_classes = []  # No authentication required for public data
+    
+    def get_queryset(self):
+        category_id = self.kwargs.get('pk')
+        try:
+            category_obj = Category.objects.get(id=category_id)
+            return SubCategory.objects.filter(category=category_obj)
+        except Category.DoesNotExist:
+            return SubCategory.objects.none()
+    
+    def get_serializer_class(self):
+        return SubCategoryListSerializer
+    
+    def get(self, request, pk, format=None):
+        try:
+            category_obj = Category.objects.get(id=pk)
+        except Category.DoesNotExist:
+            return self.error_response("Category Not Found", 404)
+        
+        sub_category_list = SubCategory.objects.filter(category=category_obj)
+
+        serializer = SubCategoryListSerializer(
+            sub_category_list,
+            many=True,
+            context={"request": request},
+        )
+
+        return self.success_response(data=serializer.data, message='Data retrieved successfully')
+
+        return Response(success_response)
+    
+
+class SliderImageApiView(BaseDetailView):
+    """
+    Get slider image for subcategory
+    """
+    permission_classes = []
+    
+    def get_queryset(self):
+        return SubCategory.objects.all()
+    
+    def get_serializer_class(self):
+        return SubCategoryImgSerializer
+    
+    def get(self, request, pk=None):
+        try:
+            sub_category_obj = SubCategory.objects.get(id=pk)
+        except SubCategory.DoesNotExist:
+            return self.error_response("Sub Category Not Found", 404)
+        
+        if sub_category_obj.market_slider_img:
+            logger.debug('SubCategory has market slider image')
+            serializer = SubCategoryImgSerializer(sub_category_obj)
+            return self.success_response(data=serializer.data, message='Data retrieved successfully')
+        elif sub_category_obj.category.market_slider_img:
+            logger.debug('Category has market slider image')
+            serializer = CategoryImgSerializer(sub_category_obj.category)
+            return self.success_response(data=serializer.data, message='Data retrieved successfully')
+        elif sub_category_obj.category.group.market_slider_img:
+            logger.debug('Group has market slider image')
+            serializer = GroupImgSerializer(sub_category_obj.category.group)
+            return self.success_response(data=serializer.data, message='Data retrieved successfully')
+        return self.error_response("No slider image found", 404)
+
+
+class ProductGroupListAPIView(BaseListView):
+    """
+    List all product groups
+    """
+    permission_classes = []  # No authentication required for public data
+    
+    def get_queryset(self):
+        return ProductGroup.objects.all()
+    
+    def get_serializer_class(self):
+        return ProductGroupListSerializer
+    
+    def get(self, request, format=None):
+        product_group_list = ProductGroup.objects.all()
+
+        serializer = ProductGroupListSerializer(
+            product_group_list,
+            many=True,
+            context={"request": request},
+        )
+
+        return self.success_response(data=serializer.data, message='Data retrieved successfully')
+
+
+class ProductCategoryListAPIView(BaseListView):
+    """
+    List product categories for a specific product group
+    """
+    permission_classes = []  # No authentication required for public data
+    
+    def get_queryset(self):
+        product_group_id = self.kwargs.get('pk')
+        try:
+            product_group_obj = ProductGroup.objects.get(id=product_group_id)
+            return ProductCategory.objects.filter(product_group=product_group_obj)
+        except ProductGroup.DoesNotExist:
+            return ProductCategory.objects.none()
+    
+    def get_serializer_class(self):
+        return ProductCategoryListSerializer
+    
+    def get(self, request, pk, format=None):
+        try:
+            product_group_obj = ProductGroup.objects.get(id=pk)
+        except ProductGroup.DoesNotExist:
+            return self.error_response("Product Group Not Found", 404)
+        
+        product_category_list = ProductCategory.objects.filter(product_group=product_group_obj)
+
+        serializer = ProductCategoryListSerializer(
+            product_category_list,
+            many=True,
+            context={"request": request},
+        )
+
+        return self.success_response(data=serializer.data, message='Data retrieved successfully')
+
+
+class ProductSubCategoryListAPIView(BaseListView):
+    """
+    List product subcategories for a specific product category
+    """
+    permission_classes = []  # No authentication required for public data
+    
+    def get_queryset(self):
+        product_category_id = self.kwargs.get('pk')
+        try:
+            product_category_obj = ProductCategory.objects.get(id=product_category_id)
+            return ProductSubCategory.objects.filter(product_category=product_category_obj)
+        except ProductCategory.DoesNotExist:
+            return ProductSubCategory.objects.none()
+    
+    def get_serializer_class(self):
+        return ProductSubCategoryListSerializer
+    
+    def get(self, request, pk, format=None):
+        try:
+            product_category_obj = ProductCategory.objects.get(id=pk)
+        except ProductCategory.DoesNotExist:
+            return self.error_response("Category Not Found", 404)
+        
+        product_sub_category_list = ProductSubCategory.objects.filter(product_category=product_category_obj)
+
+        serializer = SubCategoryListSerializer(
+            product_sub_category_list,
+            many=True,
+            context={"request": request},
+        )
+
+        success_response = ApiResponse(
+            success=True,
+            code=200,
+            data=serializer.data,
+            message='Data retrieved successfully'
+        )
+
+        return Response(success_response)

@@ -1,0 +1,358 @@
+openapi: 3.0.3
+info:
+  title: ASOUD Platform API
+  version: 1.0.0
+  description: |
+    Minimal OpenAPI specification derived from API_DOCUMENTATION.md
+    - Auth: Django Token Authentication via Authorization header: "Token <token>"
+    - All public endpoints are versioned under /api/v1/
+servers:
+  - url: https://5.10.248.32
+    description: Production
+components:
+  securitySchemes:
+    tokenAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Use "Token <token>"
+  schemas:
+    ErrorDetail:
+      type: object
+      properties:
+        code:
+          type: string
+        detail:
+          type: string
+        field_errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        code:
+          type: integer
+          example: 400
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+        timestamp:
+          type: string
+          format: date-time
+    Pagination:
+      type: object
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          nullable: true
+        previous:
+          type: string
+          nullable: true
+        results:
+          type: array
+          items:
+            type: object
+    OrderItem:
+      type: object
+      properties:
+        product:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+        market:
+          type: string
+          format: uuid
+      required: [product, quantity, market]
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_number:
+          type: string
+        total_amount:
+          type: integer
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        order:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+        payment_method:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+security:
+  - tokenAuth: []
+paths:
+  /api/v1/owner/order/list/:
+    get:
+      summary: Get owner orders list
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: date_from
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: date_to
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Pagination'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/user/order/create/:
+    post:
+      summary: Create order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/OrderItem'
+                shipping_address:
+                  type: string
+                notes:
+                  type: string
+              required: [items]
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  code:
+                    type: integer
+                    example: 201
+                  data:
+                    $ref: '#/components/schemas/Order'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/user/payments/:
+    get:
+      summary: Get payments list
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: status
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Pagination'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/user/payments/verify/:
+    post:
+      summary: Verify payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payment_id:
+                  type: string
+                  format: uuid
+                authority:
+                  type: string
+              required: [payment_id, authority]
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  code:
+                    type: integer
+                  data:
+                    type: object
+                    properties:
+                      payment_id:
+                        type: string
+                      status:
+                        type: string
+                      amount:
+                        type: integer
+        '400':
+          description: Payment failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/owner/market/logo/{pk}/:
+    post:
+      summary: Upload market logo
+      parameters:
+        - in: path
+          name: pk
+          required: true
+          schema:
+            type: string
+            description: Market ID (uuid)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                logo:
+                  type: string
+                  format: binary
+              required: [logo]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: File upload error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/chat/rooms/:
+    get:
+      summary: Get chat rooms
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Create chat room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+              required: [name]
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+
+

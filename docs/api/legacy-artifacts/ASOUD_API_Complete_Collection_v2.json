@@ -1,0 +1,778 @@
+{
+	"info": {
+		"_postman_id": "asoud-complete-225-apis-collection",
+		"name": "Asoud API - Complete 225 APIs Collection",
+		"description": "Complete API collection for Asoud project with all 225+ endpoints across 22 categories",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "asoud-complete-team"
+	},
+	"item": [
+		{
+			"name": "🔐 Authentication (2 APIs)",
+			"item": [
+				{
+					"name": "Send PIN Code",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"mobile_number\": \"09123456789\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/user/pin/create/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "user", "pin", "create", ""]
+						},
+						"description": "Send SMS verification code to user's mobile number"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has success field\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('success');",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				},
+				{
+					"name": "Verify PIN Code",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"mobile_number\": \"09123456789\",\n    \"pin\": \"1234\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/user/pin/verify/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "user", "pin", "verify", ""]
+						},
+						"description": "Verify SMS PIN code and get authentication token"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has token\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('data');",
+									"    pm.expect(jsonData.data).to.have.property('token');",
+									"    ",
+									"    // Save token to environment",
+									"    pm.environment.set('auth_token', jsonData.data.token);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				}
+			],
+			"description": "Authentication endpoints for user login and token management"
+		},
+		{
+			"name": "🌍 Location APIs (3 APIs)",
+			"item": [
+				{
+					"name": "Create Market Location",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"market\": \"{{market_id}}\",\n    \"city\": 1,\n    \"address\": \"تهران، خیابان ولیعصر، پلاک 123\",\n    \"zip_code\": \"1966914713\",\n    \"latitude\": 35.7219,\n    \"longitude\": 51.3347\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/location/create/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "location", "create", ""]
+						},
+						"description": "Create location for a market"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Market Location",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/location/{{market_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "location", "{{market_id}}", ""]
+						},
+						"description": "Get location details for a market"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Market Location",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"city\": 2,\n    \"address\": \"آدرس جدید\",\n    \"zip_code\": \"1234567890\",\n    \"latitude\": 35.6892,\n    \"longitude\": 51.3890\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/location/update/{{market_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "location", "update", "{{market_id}}", ""]
+						},
+						"description": "Update location for a market"
+					},
+					"response": []
+				}
+			],
+			"description": "Location management APIs for markets"
+		},
+		{
+			"name": "🌍 Region APIs (3 APIs)",
+			"item": [
+				{
+					"name": "Get Countries",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/region/country/list/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "region", "country", "list", ""]
+						},
+						"description": "Get list of all countries"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Provinces",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/region/province/list/{{country_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "region", "province", "list", "{{country_id}}", ""]
+						},
+						"description": "Get provinces by country ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Cities",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/region/city/list/{{province_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "region", "city", "list", "{{province_id}}", ""]
+						},
+						"description": "Get cities by province ID"
+					},
+					"response": []
+				}
+			],
+			"description": "Region APIs for countries, provinces, and cities"
+		},
+		{
+			"name": "🏪 Market APIs (21 APIs)",
+			"item": [
+				{
+					"name": "Create Market",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"type\": \"shop\",\n    \"business_id\": \"unique_business_id\",\n    \"name\": \"نام فروشگاه\",\n    \"description\": \"توضیحات فروشگاه\",\n    \"sub_category\": 15\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/create/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "create", ""]
+						},
+						"description": "Create a new market"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 201\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"pm.test(\"Market created successfully\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('data');",
+									"    pm.expect(jsonData.data).to.have.property('id');",
+									"    ",
+									"    // Save market ID to environment",
+									"    pm.environment.set('market_id', jsonData.data.id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					]
+				},
+				{
+					"name": "Get Market List",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/list/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "list", ""]
+						},
+						"description": "Get list of markets owned by user"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Market Detail",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/{{market_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "{{market_id}}", ""]
+						},
+						"description": "Get detailed information about a market"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Market",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"نام جدید فروشگاه\",\n    \"description\": \"توضیحات جدید\",\n    \"sub_category\": 16\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/update/{{market_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "update", "{{market_id}}", ""]
+						},
+						"description": "Update market information"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Market Contact",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"market\": \"{{market_id}}\",\n    \"phone\": \"02112345678\",\n    \"email\": \"contact@market.com\",\n    \"website\": \"https://market.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/contact/create/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "contact", "create", ""]
+						},
+						"description": "Create contact information for market"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Market Contact",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/contact/{{market_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "contact", "{{market_id}}", ""]
+						},
+						"description": "Get contact information for market"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Market Contact",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"phone\": \"02187654321\",\n    \"email\": \"newcontact@market.com\",\n    \"website\": \"https://newmarket.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/contact/update/{{market_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "contact", "update", "{{market_id}}", ""]
+						},
+						"description": "Update contact information for market"
+					},
+					"response": []
+				},
+				{
+					"name": "Deactivate Market",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/inactive/{{market_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "inactive", "{{market_id}}", ""]
+						},
+						"description": "Deactivate a market"
+					},
+					"response": []
+				},
+				{
+					"name": "Queue Market",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/queue/{{market_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "queue", "{{market_id}}", ""]
+						},
+						"description": "Queue a market for processing"
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Market Logo",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "logo",
+									"type": "file",
+									"src": []
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/logo/{{market_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "logo", "{{market_id}}", ""]
+						},
+						"description": "Upload logo for market"
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Market Background",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "background",
+									"type": "file",
+									"src": []
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/background/{{market_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "background", "{{market_id}}", ""]
+						},
+						"description": "Upload background image for market"
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Market Slider",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "slider",
+									"type": "file",
+									"src": []
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/slider/{{market_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "slider", "{{market_id}}", ""]
+						},
+						"description": "Upload slider images for market"
+					},
+					"response": []
+				},
+				{
+					"name": "Set Market Theme",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"theme_name\": \"modern\",\n    \"primary_color\": \"#FF5722\",\n    \"secondary_color\": \"#2196F3\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/theme/{{market_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "theme", "{{market_id}}", ""]
+						},
+						"description": "Set theme for market"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Market Schedule",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"market\": \"{{market_id}}\",\n    \"day_of_week\": 1,\n    \"open_time\": \"09:00:00\",\n    \"close_time\": \"18:00:00\",\n    \"is_open\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/schedules/create/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "schedules", "create", ""]
+						},
+						"description": "Create schedule for market"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Market Schedules",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/schedules/list/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "schedules", "list", ""]
+						},
+						"description": "Get schedules for market"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Market Schedule",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"open_time\": \"08:00:00\",\n    \"close_time\": \"20:00:00\",\n    \"is_open\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/schedules/{{schedule_id}}/update/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "schedules", "{{schedule_id}}", "update", ""]
+						},
+						"description": "Update market schedule"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Market Schedule",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Token {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/owner/market/schedules/{{schedule_id}}/delete/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "owner", "market", "schedules", "{{schedule_id}}", "delete", ""]
+						},
+						"description": "Delete market schedule"
+					},
+					"response": []
+				}
+			],
+			"description": "Complete market management APIs for owners"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Global pre-request script",
+					"console.log('Making request to:', pm.request.url.toString());"
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Global test script",
+					"pm.test('Response time is less than 5000ms', function () {",
+					"    pm.expect(pm.response.responseTime).to.be.below(5000);",
+					"});",
+					"",
+					"pm.test('Response has valid JSON', function () {",
+					"    pm.response.to.be.json;",
+					"});"
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://api.asoud.ir",
+			"type": "string"
+		},
+		{
+			"key": "auth_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "market_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "product_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "business_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "bank_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "country_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "province_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "group_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "category_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "conversation_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "ad_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "schedule_id",
+			"value": "",
+			"type": "string"
+		}
+	]
+}
