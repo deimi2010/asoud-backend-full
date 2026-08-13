@@ -3,8 +3,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import permissions, serializers, status, views
 from rest_framework.response import Response
 
-from apps.market.models import Market
-from apps.market.access import accessible_markets, market_access_filter
+from apps.market.access import accessible_markets, lock_accessible_market, market_access_filter
 from apps.reserve.models import DayOff
 from apps.reserve.serializers.owner import DayOffCreateSerializer, DayOffSerializer
 from utils.response import ApiResponse
@@ -23,9 +22,10 @@ class DayOffCreateView(views.APIView):
         serializer = DayOffCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        market = get_object_or_404(
-            accessible_markets(request.user, write=True).select_for_update(),
-            id=data['market'],
+        market = lock_accessible_market(
+            market_id=data['market'],
+            user=request.user,
+            write=True,
         )
         day_off, created = DayOff.objects.get_or_create(market=market, date=data['date'])
         response_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK

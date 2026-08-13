@@ -1,4 +1,5 @@
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 
 from apps.market.models import Market, MarketMembership
 
@@ -34,4 +35,22 @@ def market_access_filter(prefix, user, *, write=False):
             f'{prefix}memberships__is_active': True,
             f'{prefix}memberships__role__in': roles,
         }
+    )
+
+
+def lock_accessible_market(*, market_id, user, write=False):
+    """Authorize through membership joins, then lock only the market table.
+
+    PostgreSQL rejects ``FOR UPDATE`` on the DISTINCT/outer-join query required
+    for membership access. Keeping authorization and the row lock as separate
+    queries avoids locking nullable joined rows while preserving tenant scope.
+    Callers must already be inside ``transaction.atomic``.
+    """
+    authorized_id = get_object_or_404(
+        accessible_markets(user, write=write).values('id'),
+        id=market_id,
+    )['id']
+    return get_object_or_404(
+        Market.objects.select_for_update(),
+        id=authorized_id,
     )

@@ -3,8 +3,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status, views
 from rest_framework.response import Response
 
-from apps.market.models import Market
-from apps.market.access import accessible_markets, market_access_filter
+from apps.market.access import lock_accessible_market, market_access_filter
 from apps.reserve.models import Reservation, Service
 from apps.reserve.serializers.owner import (
     ServiceCreateSerializer,
@@ -31,9 +30,10 @@ class ServiceCreateView(views.APIView):
     def post(self, request):
         serializer = ServiceCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        market = get_object_or_404(
-            accessible_markets(request.user, write=True).select_for_update(),
-            id=serializer.validated_data['market'],
+        market = lock_accessible_market(
+            market_id=serializer.validated_data['market'],
+            user=request.user,
+            write=True,
         )
         service = Service.objects.create(
             market=market,
@@ -84,9 +84,11 @@ class ServiceUpdateView(views.APIView):
 
     @transaction.atomic
     def put(self, request, pk):
+        authorized_id = get_object_or_404(
+            _accessible_services(request.user, write=True).values('id'), id=pk,
+        )['id']
         service = get_object_or_404(
-            _accessible_services(request.user, write=True).select_for_update(),
-            id=pk,
+            Service.objects.select_for_update(), id=authorized_id,
         )
         serializer = ServiceUpdateSerializer(service, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -106,9 +108,11 @@ class ServiceDeleteView(views.APIView):
 
     @transaction.atomic
     def delete(self, request, pk):
+        authorized_id = get_object_or_404(
+            _accessible_services(request.user, write=True).values('id'), id=pk,
+        )['id']
         service = get_object_or_404(
-            _accessible_services(request.user, write=True).select_for_update(),
-            id=pk,
+            Service.objects.select_for_update(), id=authorized_id,
         )
         if Reservation.objects.filter(reserve__service=service).exists():
             return Response(

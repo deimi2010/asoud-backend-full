@@ -33,11 +33,13 @@ def _lock_owned_reserve_time(reserve_id, user):
         ReserveTime.objects.only('service_id').filter(access),
         id=reserve_id,
     )
-    service = get_object_or_404(
-        Service.objects.select_for_update().filter(
-            market_access_filter('market__', user, write=True)
-        ),
+    authorized_service_id = get_object_or_404(
+        Service.objects.filter(market_access_filter('market__', user, write=True))
+        .values('id'),
         id=candidate.service_id,
+    )['id']
+    service = get_object_or_404(
+        Service.objects.select_for_update(), id=authorized_service_id,
     )
     return get_object_or_404(
         ReserveTime.objects.select_for_update(),
@@ -55,11 +57,14 @@ class ReserveTimeCreateView(views.APIView):
         serializer = ReserveTimeCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        service = get_object_or_404(
-            Service.objects.select_for_update().filter(
+        authorized_service_id = get_object_or_404(
+            Service.objects.filter(
                 market_access_filter('market__', request.user, write=True)
-            ),
+            ).values('id'),
             id=data['service'],
+        )['id']
+        service = get_object_or_404(
+            Service.objects.select_for_update(), id=authorized_service_id,
         )
         reserve = ReserveTime.objects.filter(service=service, day=data['day']).first()
         response_status = status.HTTP_200_OK
