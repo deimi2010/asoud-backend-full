@@ -1,6 +1,7 @@
 """
 Base view classes for consistent API structure and DRF Spectacular compatibility
 """
+from rest_framework import permissions
 from rest_framework.views import APIView
 from rest_framework.generics import GenericAPIView
 from rest_framework.response import Response
@@ -9,11 +10,44 @@ from typing import Any, Dict, List, Optional
 from utils.response import ApiResponse
 
 
+def public_endpoint(view_class):
+    """
+    Decorator to explicitly mark an API endpoint as public (AllowAny).
+    
+    This ensures that public endpoints are intentional and documented.
+    Usage:
+        @public_endpoint
+        class MyPublicView(BaseAPIView):
+            permission_classes = [permissions.AllowAny]
+    """
+    if not hasattr(view_class, 'permission_classes'):
+        raise AssertionError(
+            f"{view_class.__name__} decorated with @public_endpoint must explicitly "
+            "set permission_classes = [permissions.AllowAny]"
+        )
+    if permissions.AllowAny not in view_class.permission_classes:
+        raise AssertionError(
+            f"{view_class.__name__} decorated with @public_endpoint must include "
+            "permissions.AllowAny in permission_classes"
+        )
+    # Mark the view as intentionally public for documentation
+    view_class._is_public_endpoint = True
+    return view_class
+
+
 class BaseAPIView(GenericAPIView):
     """
-    Base API view with common functionality and DRF Spectacular compatibility
+    Base API view with common functionality and DRF Spectacular compatibility.
+
+    Defaults must stay authenticated so that views inheriting this class without an
+    explicit permission policy do not accidentally become public APIs.
+    
+    Security Model:
+    - All views default to IsAuthenticated unless explicitly overridden
+    - Public endpoints MUST set permission_classes = [permissions.AllowAny]
+    - Use @public_endpoint decorator to explicitly mark public views
     """
-    permission_classes = []
+    permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
         """

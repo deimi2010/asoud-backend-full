@@ -167,3 +167,13 @@ MEDIA_ROOT = os.environ.get("DJANGO_MEDIA_ROOT", "/app/media")
 WHITENOISE_USE_FINDERS = False
 WHITENOISE_AUTOREFRESH = False
 WHITENOISE_MANIFEST_STRICT = True
+
+# Final production configuration validation to catch issues early
+from config.security_settings import SecurityConfig
+try:
+    SecurityConfig.validate_configuration()
+except ImproperlyConfigured as exc:
+    # Production must fail immediately if configuration is incomplete
+    raise ImproperlyConfigured(
+        f"Production configuration validation failed: {exc}"
+    ) from exc

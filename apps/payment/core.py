@@ -27,7 +27,39 @@ from apps.wallet.models import Wallet
 logger = logging.getLogger(__name__)
 
 
-def reconcile_stale_payment_sessions(*, cutoff=None, limit=100):
+def validate_payment_amount(amount, max_amount=None):
+    """Validate payment amount is positive, finite, and within bounds.
+    
+    Args:
+        amount: Decimal amount to validate
+        max_amount: Optional maximum allowed amount (default: 1 billion Rial)
+    
+    Returns:
+        Tuple (is_valid, error_message)
+    """
+    if max_amount is None:
+        max_amount = Decimal('1000000000')  # 1 billion Rial max
+    
+    try:
+        amount = Decimal(str(amount))
+    except (InvalidOperation, TypeError, ValueError):
+        return False, "Amount must be a valid number"
+    
+    if not amount.is_finite():
+        return False, "Amount must be a finite number"
+    
+    if amount <= 0:
+        return False, "Amount must be positive"
+    
+    if amount > max_amount:
+        return False, f"Amount exceeds maximum allowed: {max_amount}"
+    
+    # Normalize to remove trailing zeros, then check decimal places
+    normalized = amount.normalize()
+    if normalized.as_tuple().exponent < -2:
+        return False, "Amount cannot have more than 2 decimal places"
+    
+    return True, None
     """Reconcile stale gateway sessions without guessing their financial state."""
     if cutoff is None:
         ttl_seconds = getattr(settings, 'PAYMENT_SESSION_TTL_SECONDS', 30 * 60)
@@ -143,7 +175,13 @@ class PaymentCore:
                 if target.status not in (Order.PENDING, Order.VERIFIED) or not target.items.exists():
                     return False, 'Order is not payable'
                 amount = Decimal(str(target.total_price()))
-                if amount <= 0 or amount != Decimal(str(requested_amount)):
+                
+                # Validate amount before proceeding
+                is_valid, validation_error = validate_payment_amount(amount)
+                if not is_valid:
+                    return False, validation_error
+                
+                if amount != Decimal(str(requested_amount)):
                     return False, 'Order total changed; refresh before paying'
 
                 try:
@@ -402,6 +440,16 @@ class PostPaymentCore:
                 )
                 expected_amount = Decimal(str(order.total_price()))
                 requested_amount = Decimal(str(amount))
+                
+                # Validate both amounts
+                is_valid, error = validate_payment_amount(expected_amount)
+                if not is_valid:
+                    return False, f"Order amount invalid: {error}"
+                
+                is_valid, error = validate_payment_amount(requested_amount)
+                if not is_valid:
+                    return False, f"Requested amount invalid: {error}"
+                
                 if expected_amount <= 0 or requested_amount != expected_amount:
                     return False, 'Amount does not match the current order total'
 

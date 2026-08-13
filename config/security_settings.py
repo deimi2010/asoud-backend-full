@@ -115,17 +115,52 @@ class SecurityConfig:
     
     @classmethod
     def validate_configuration(cls):
-        """Validate security configuration"""
-        required_settings = [
-            'SECRET_KEY',
-            'DATABASE_URL',
-            'REDIS_URL',
-        ]
+        """Validate the settings that are actually used by this project.
+
+        This project builds database credentials from environment variables like
+        DATABASE_NAME / DATABASE_USERNAME / DATABASE_PASSWORD and derives REDIS_URL
+        from REDIS_HOST / REDIS_PORT when needed. Those names are the real runtime
+        contract, so validation must accept them instead of looking for non-existent
+        DATABASE_URL / REDIS_URL names in all environments.
         
+        Production environments will call this explicitly to ensure all required
+        settings are present before startup. Development and test settings may 
+        intentionally skip some checks.
+        """
+        required_settings = ['SECRET_KEY']
         for setting in required_settings:
             if not hasattr(settings, setting) or not getattr(settings, setting):
                 raise ImproperlyConfigured(f"Required setting {setting} is not configured")
-        
+
+        # Validate database configuration
+        database_config = getattr(settings, 'DATABASES', {}).get('default', {})
+        engine = database_config.get('ENGINE', '')
+        if engine and 'postgresql' in engine:
+            # PostgreSQL requires explicit database name
+            if not database_config.get('NAME'):
+                raise ImproperlyConfigured(
+                    'Database configuration is incomplete: DATABASES["default"]["NAME"] is not set'
+                )
+            if not database_config.get('USER'):
+                raise ImproperlyConfigured(
+                    'Database configuration is incomplete: DATABASES["default"]["USER"] is not set'
+                )
+        elif not engine:
+            raise ImproperlyConfigured('Database configuration is missing from settings.DATABASES')
+
+        # Validate Redis/cache configuration
+        redis_url = getattr(settings, 'REDIS_URL', '')
+        if not redis_url:
+            redis_host = getattr(settings, 'REDIS_HOST', '')
+            if not redis_host:
+                # Only fail if we're in production (DEBUG is False and not in test)
+                debug_mode = getattr(settings, 'DEBUG', False)
+                environment = getattr(settings, 'ENVIRONMENT', 'unknown')
+                if not debug_mode and environment != 'test':
+                    raise ImproperlyConfigured(
+                        'Redis configuration is missing: set REDIS_URL or REDIS_HOST in production'
+                    )
+
         return True
 
 # Security Middleware

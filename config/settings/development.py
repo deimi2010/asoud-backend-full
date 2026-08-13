@@ -4,11 +4,16 @@ Optimized for local development with SQLite
 """
 
 import os
+import secrets
 from .base import *
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 OTP_ALLOW_LOCAL_CACHE = True
+
+# A process-local signing key keeps development one-command simple.
+# Development doesn't require a persistent SECRET_KEY since it's not exposed.
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY") or secrets.token_urlsafe(50)
 
 # Development hosts
 ALLOWED_HOSTS = [

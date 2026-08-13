@@ -368,7 +368,11 @@ REDIS_PORT = os.environ.get('REDIS_PORT')
 # Redis URL for caching
 REDIS_URL = os.environ.get('REDIS_URL')
 if not REDIS_URL and REDIS_HOST:
-    REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/0"
+    # Only include password in URL if it's actually set
+    if REDIS_PASSWORD:
+        REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/0"
+    else:
+        REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
 elif not REDIS_URL:
     REDIS_URL = "redis://localhost:6379/0"
 
@@ -435,3 +439,10 @@ CORS_ALLOWED_HEADERS = [
 
 
 # (Removed duplicate REST_FRAMEWORK block; keeping the primary one above)
+
+# Validate critical settings on startup to catch configuration errors early.
+# NOTE: This is deferred so that environment-specific modules (development.py, local.py, etc.)
+# can override settings before validation. The validation will be called explicitly by
+# production.py and other modules that need it.
+# Do NOT uncomment this line here - it will break development and test settings.
+# SecurityConfig.validate_configuration() is called by production.py instead.
