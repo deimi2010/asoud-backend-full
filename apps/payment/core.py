@@ -60,11 +60,14 @@ def validate_payment_amount(amount, max_amount=None):
         return False, "Amount cannot have more than 2 decimal places"
     
     return True, None
+
+
+def reconcile_stale_payment_sessions(*, cutoff=None, limit=100):
     """Reconcile stale gateway sessions without guessing their financial state."""
     if cutoff is None:
-        ttl_seconds = getattr(settings, 'PAYMENT_SESSION_TTL_SECONDS', 30 * 60)
+        ttl_seconds = getattr(settings, "PAYMENT_SESSION_TTL_SECONDS", 30 * 60)
         cutoff = timezone.now() - timedelta(seconds=ttl_seconds)
-
+    
     session_ids = list(
         Payment.objects.filter(
             status=Payment.PENDING,
