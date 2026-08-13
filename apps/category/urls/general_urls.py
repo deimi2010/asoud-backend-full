@@ -42,7 +42,7 @@ urlpatterns = [
     path(
         'product-group/list/',
         ProductGroupListAPIView.as_view(),
-        name='group-list',
+        name='product-group-list',
     ),
     path(
         'product/list/<str:pk>/',

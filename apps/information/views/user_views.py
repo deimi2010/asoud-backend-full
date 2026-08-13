@@ -11,6 +11,7 @@ from apps.information.serializers.user_serializers import TermListSerializer
 class TermListAPIView(views.APIView):
     # Terms of service must be readable before login (signup flow shows them).
     permission_classes = [AllowAny]
+    serializer_class = TermListSerializer
 
     def get(self, request, format=None):
         try:

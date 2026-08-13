@@ -42,7 +42,7 @@ class AdvertiseSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
 
-    def get_user(self, obj):
+    def get_user(self, obj) -> dict:
         return {'id': str(obj.user_id)}
 
 

@@ -7,6 +7,7 @@ from .models import (
     ProductDiscount,
     ProductTheme,
     ProductShipping,
+    ProductRevision,
 )
 
 # Register your models here.
@@ -70,6 +71,13 @@ class ProductAdmin(BaseAdmin):
 
 
 admin.site.register(Product, ProductAdmin)
+
+
+@admin.register(ProductRevision)
+class ProductRevisionAdmin(BaseAdmin):
+    list_display = ('product', 'status', 'created_by', 'reviewed_by', 'created_at')
+    list_filter = ('status',)
+    readonly_fields = BaseAdmin.readonly_fields + ('payload',)
 class ProductShipAdmin(BaseAdmin):
     list_display = ('id', 'name', 'price')
 admin.site.register(ProductShipping, ProductShipAdmin)

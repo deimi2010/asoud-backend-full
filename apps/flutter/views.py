@@ -25,11 +25,13 @@ from apps.users.models import UserBankInfo
 from apps.users.serializers import PublicUserBankInfoSerializer
 from apps.analytics.models import AnalyticsEvent
 from apps.analytics.services import AnalyticsRecorder
+from apps.referral.access import viewable_markets
 # Create your views here.
 
 
 class MarketDetailView(views.APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketListSerializer
 
     def get(self, request):
         market_id = request.GET.get('id')
@@ -44,7 +46,7 @@ class MarketDetailView(views.APIView):
             )
         
         try:
-            market = Market.objects.get(id=market_id)
+            market = viewable_markets(request.user).get(id=market_id)
         except Market.DoesNotExist:
             return Response(
                 ApiResponse(
@@ -71,7 +73,7 @@ class MarketDetailView(views.APIView):
         
 
 class ProductDetailView(views.APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
         parameters=[ProductDetailQuerySerializer],
@@ -93,6 +95,7 @@ class ProductDetailView(views.APIView):
                     'gift_product__market',
                 )
                 .prefetch_related('keywords', 'images', 'ships')
+                .filter(market__in=viewable_markets(request.user))
                 .get(
                     id=query.validated_data['id'],
                     status=Product.PUBLISHED,
@@ -134,6 +137,7 @@ class ProductDetailView(views.APIView):
 
 class AdvertizeDetailView(views.APIView):
     permission_classes = [permissions.AllowAny]
+    serializer_class = AdvertiseSerializer
 
     def get(self, request):
         ad_id = request.GET.get('id')
@@ -174,10 +178,10 @@ class VisitCardView(BaseDetailView):
     """
     Get market visit card details
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        return Market.objects.select_related(
+        return viewable_markets(self.request.user).select_related(
             'sub_category',
             'location',
             'contact'
@@ -235,7 +239,8 @@ class MarketProductThemesView(views.APIView):
     The owner theme endpoints enforce ownership, so the mobile app had no
     way to render another user's store.
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ProductThemeListSerializer
 
     def get(self, request):
         market_id = request.GET.get('id')
@@ -250,7 +255,7 @@ class MarketProductThemesView(views.APIView):
             )
 
         try:
-            market = Market.objects.get(id=market_id)
+            market = viewable_markets(request.user).get(id=market_id)
         except Market.DoesNotExist:
             return Response(
                 ApiResponse(

@@ -717,6 +717,7 @@ class ChatAnalyticsView(BaseAPIView):
     View for chat analytics
     """
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ChatAnalyticsSerializer
     
     @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     def get(self, request):
@@ -765,6 +766,7 @@ class ChatSearchView(BaseAPIView):
     View for searching chat messages
     """
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ChatMessageSerializer
     
     def get(self, request):
         """Search chat messages"""

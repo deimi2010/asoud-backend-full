@@ -1,0 +1,97 @@
+from django.shortcuts import get_object_or_404
+from rest_framework import serializers, views
+from rest_framework.response import Response
+
+from apps.core.permissions import IsPlatformAdmin
+from apps.market.models import Market, MarketRevision
+from apps.market.services import review_market_publication, review_market_revision
+from apps.payment.models import Payment
+
+
+class RevisionDecisionSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=('approve', 'reject'))
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class PublicationDecisionSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=('approve', 'reject'))
+    payment_id = serializers.UUIDField(required=False)
+
+    def validate(self, attrs):
+        if attrs['action'] == 'approve' and not attrs.get('payment_id'):
+            raise serializers.ValidationError({'payment_id': 'Required for publication.'})
+        return attrs
+
+
+class MarketRevisionListAdminView(views.APIView):
+    permission_classes = [IsPlatformAdmin]
+    serializer_class = RevisionDecisionSerializer
+
+    def get(self, request):
+        revisions = MarketRevision.objects.filter(
+            status=MarketRevision.PENDING,
+        ).select_related('market', 'created_by')
+        return Response([
+            {
+                'id': str(revision.id),
+                'market_id': str(revision.market_id),
+                'market_name': revision.market.name,
+                'payload': revision.payload,
+                'created_at': revision.created_at,
+            }
+            for revision in revisions
+        ])
+
+class MarketRevisionDecisionAdminView(views.APIView):
+    permission_classes = [IsPlatformAdmin]
+    serializer_class = RevisionDecisionSerializer
+
+    def post(self, request, pk):
+        decision = RevisionDecisionSerializer(data=request.data)
+        decision.is_valid(raise_exception=True)
+        revision = get_object_or_404(
+            MarketRevision.objects.select_related('market'),
+            pk=pk,
+            status=MarketRevision.PENDING,
+        )
+        revision = review_market_revision(
+            revision=revision,
+            reviewer=request.user,
+            action=decision.validated_data['action'],
+            reason=decision.validated_data['reason'],
+        )
+        return Response({'id': str(revision.id), 'status': revision.status})
+
+
+class MarketPublicationAdminView(views.APIView):
+    permission_classes = [IsPlatformAdmin]
+    serializer_class = PublicationDecisionSerializer
+
+    def post(self, request, market_id):
+        decision = PublicationDecisionSerializer(data=request.data)
+        decision.is_valid(raise_exception=True)
+        market = get_object_or_404(
+            Market.objects.all(),
+            pk=market_id,
+            status__in=(
+                Market.QUEUE, Market.NOT_PUBLISHED, Market.NEEDS_EDITING, Market.PUBLISHED,
+            ),
+        )
+        payment = None
+        if decision.validated_data['action'] == 'approve':
+            payment = get_object_or_404(
+                Payment.objects.all(),
+                pk=decision.validated_data['payment_id'],
+                amount__isnull=False,
+            )
+        market, commissions = review_market_publication(
+            market=market,
+            reviewer=request.user,
+            action=decision.validated_data['action'],
+            payment=payment,
+        )
+        return Response({
+            'market_id': str(market.id),
+            'status': market.status,
+            'commission_count': len(commissions),
+        })

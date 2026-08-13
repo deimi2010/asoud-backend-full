@@ -7,6 +7,8 @@ from .views import (
     NotificationQueueView, NotificationStatsView, NotificationCleanupView
 )
 
+app_name = 'notification'
+
 # WebSocket URLs
 websocket_urlpatterns = [
     path("ws/notifications", NotificationConsumer.as_asgi()),
@@ -20,9 +22,9 @@ router.register(r'preferences', NotificationPreferenceViewSet, basename='prefere
 
 # API URL patterns
 urlpatterns = [
-    path('api/v1/', include(router.urls)),
-    path('api/v1/bulk/', BulkNotificationView.as_view(), name='bulk-notifications'),
-    path('api/v1/queue/', NotificationQueueView.as_view(), name='notification-queue'),
-    path('api/v1/stats/', NotificationStatsView.as_view(), name='notification-stats'),
-    path('api/v1/cleanup/', NotificationCleanupView.as_view(), name='notification-cleanup'),
+    path('', include(router.urls)),
+    path('bulk/', BulkNotificationView.as_view(), name='bulk'),
+    path('queue/', NotificationQueueView.as_view(), name='queue'),
+    path('stats/', NotificationStatsView.as_view(), name='stats'),
+    path('cleanup/', NotificationCleanupView.as_view(), name='cleanup'),
 ]

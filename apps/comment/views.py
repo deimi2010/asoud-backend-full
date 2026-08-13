@@ -45,6 +45,7 @@ def _comment_target_is_public(comment):
 
 
 class CommentView(APIView):
+    serializer_class = CommentUpdateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -91,6 +92,7 @@ class CommentView(APIView):
 
 
 class CommentDetailView(APIView):
+    serializer_class = CommentSerializer
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, pk):
@@ -109,6 +111,7 @@ class CommentDetailView(APIView):
 
 
 class ContentCommentsView(APIView):
+    serializer_class = CommentSerializer
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, content_type, object_id):
@@ -150,6 +153,7 @@ class ContentCommentsView(APIView):
 
 
 class CommentUpdateView(APIView):
+    serializer_class = CommentUpdateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic

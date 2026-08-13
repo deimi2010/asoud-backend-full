@@ -5,6 +5,7 @@ from rest_framework import permissions, serializers, status, views
 from rest_framework.response import Response
 
 from apps.reserve.models import Reservation, Service, Specialist
+from apps.market.access import market_access_filter
 from apps.reserve.serializers.owner import (
     SpecialistCreateSerializer,
     SpecialistSerializer,
@@ -14,12 +15,13 @@ from utils.response import ApiResponse
 
 
 def _fully_owned_specialists(user):
+    access = market_access_filter('services__market__', user, write=True)
     return (
         Specialist.objects.annotate(
             service_count=Count('services', distinct=True),
             owned_service_count=Count(
                 'services',
-                filter=Q(services__market__user=user),
+                filter=access,
                 distinct=True,
             ),
         )
@@ -33,7 +35,10 @@ def _fully_owned_specialists(user):
 
 def _owned_services(service_ids, user):
     services = list(
-        Service.objects.filter(id__in=service_ids, market__user=user).select_related('market')
+        Service.objects.filter(
+            market_access_filter('market__', user, write=True),
+            id__in=service_ids,
+        ).distinct().select_related('market')
     )
     if len(services) != len(service_ids):
         raise serializers.ValidationError(
@@ -51,6 +56,7 @@ def _lock_fully_owned_specialist(specialist_id, user):
 
 
 class SpecialistCreateView(views.APIView):
+    serializer_class = SpecialistCreateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -76,6 +82,7 @@ class SpecialistCreateView(views.APIView):
 
 
 class SpecialistDetailView(views.APIView):
+    serializer_class = SpecialistSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
@@ -90,6 +97,7 @@ class SpecialistDetailView(views.APIView):
 
 
 class SpecialistListView(views.APIView):
+    serializer_class = SpecialistSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -106,6 +114,7 @@ class SpecialistListView(views.APIView):
 
 
 class SpecialistUpdateView(views.APIView):
+    serializer_class = SpecialistUpdateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -148,6 +157,7 @@ class SpecialistUpdateView(views.APIView):
 
 
 class SpecialistDeleteView(views.APIView):
+    serializer_class = SpecialistSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic

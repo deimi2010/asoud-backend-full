@@ -9,6 +9,12 @@ from apps.base.models import BaseModel
 
 
 class User(AbstractUser):
+    """A platform identity, not an exclusive business role.
+
+    ``type`` is retained for backwards compatibility with existing clients and
+    data. Authorization must be derived from staff flags and resource
+    relationships (markets, affiliate records, etc.), never from this field.
+    """
     USER = "user"
     OWNER = "owner"
     MARKETER = "marketer"
@@ -66,6 +72,14 @@ class User(AbstractUser):
 
     def is_owner(self):
         return self.markets.exists()
+
+    @property
+    def can_manage_platform(self):
+        return self.is_staff and self.is_active
+
+    @property
+    def can_create_market(self):
+        return self.is_authenticated and self.is_active
 
 class UserProfile(BaseModel):
     user = models.OneToOneField(

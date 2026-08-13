@@ -24,6 +24,7 @@ def _reservation_queryset():
 
 
 class ReservationListView(views.APIView):
+    serializer_class = ReservationSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -38,6 +39,7 @@ class ReservationListView(views.APIView):
 
 
 class ReservationDetailView(views.APIView):
+    serializer_class = ReservationSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
@@ -56,6 +58,7 @@ class ReservationDetailView(views.APIView):
 
 
 class ReservationCreateView(views.APIView):
+    serializer_class = ReservationCreateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic

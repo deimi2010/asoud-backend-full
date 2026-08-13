@@ -3,13 +3,16 @@ from rest_framework import permissions, status, views
 from rest_framework.response import Response
 
 from apps.reserve.models import Reservation
+from apps.market.access import market_access_filter
 from apps.reserve.serializers.owner import ReservationSerializer
 from utils.response import ApiResponse
 
 
 def _owned_reservations(user):
     return (
-        Reservation.objects.filter(reserve__service__market__user=user)
+        Reservation.objects.filter(
+            market_access_filter('reserve__service__market__', user)
+        ).distinct()
         .select_related(
             'user',
             'reserve',
@@ -23,6 +26,7 @@ def _owned_reservations(user):
 
 
 class ReservationDetailView(views.APIView):
+    serializer_class = ReservationSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
@@ -37,6 +41,7 @@ class ReservationDetailView(views.APIView):
 
 
 class ReservationListView(views.APIView):
+    serializer_class = ReservationSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):

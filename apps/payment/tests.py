@@ -89,6 +89,42 @@ class PaymentCreateSecurityTests(TestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn('amount', serializer.errors)
 
+    def test_store_subscription_amount_is_server_authoritative(self):
+        market = self.product.market
+        market.status = Market.DRAFT
+        market.sub_category.market_fee = Decimal('2500')
+        market.sub_category.save(update_fields=['market_fee', 'updated_at'])
+        market.save(update_fields=['status', 'updated_at'])
+
+        wrong = self.serializer(
+            target='market_subscription', target_id=str(market.id), amount='1'
+        )
+        correct = self.serializer(
+            target='market_subscription', target_id=str(market.id), amount='2500'
+        )
+
+        self.assertFalse(wrong.is_valid())
+        self.assertIn('amount', wrong.errors)
+        self.assertTrue(correct.is_valid(), correct.errors)
+
+    def test_completed_subscription_only_queues_store_for_admin_review(self):
+        market = self.product.market
+        market.status = Market.DRAFT
+        market.is_paid = False
+        market.save(update_fields=['status', 'is_paid', 'updated_at'])
+        payment = Payment.objects.create(
+            user=self.user,
+            amount=Decimal('2500'),
+            target_content_type=ContentType.objects.get_for_model(Market),
+            target_id=market.id,
+        )
+
+        PostPaymentCore(self.user).payment_process(payment)
+
+        market.refresh_from_db()
+        self.assertEqual(market.status, Market.QUEUE)
+        self.assertFalse(market.is_paid)
+
     def test_gateway_amount_cannot_exceed_transaction_column_capacity(self):
         serializer = self.serializer(amount='1000000000000000000')
 

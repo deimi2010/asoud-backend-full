@@ -21,6 +21,8 @@ from apps.cart.services import (
     release_order_inventory,
     reserve_order_inventory,
 )
+from drf_spectacular.utils import extend_schema
+from apps.market.access import accessible_markets
 
 
 logger = logging.getLogger(__name__)
@@ -57,13 +59,16 @@ def _is_exclusively_owned_order(order, user):
         if (product_id is None) == (affiliate_id is None):
             return False
         item_markets.add(product_market_id or affiliate_market_id)
-    owner_markets = set(user.markets.values_list('id', flat=True))
+    owner_markets = set(
+        accessible_markets(user, write=True).values_list('id', flat=True)
+    )
     return bool(item_markets) and item_markets.issubset(owner_markets)
 
 
 class OrderVerifyView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(request=OrderVerifySerializer, responses={200: OrderSerializer}, tags=['Cart & Orders - Owner'])
     @transaction.atomic
     def put(self, request):
         serializer = OrderVerifySerializer(data=request.data)
@@ -152,9 +157,11 @@ class OrderVerifyView(views.APIView):
 class OrderListView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(responses={200: OrderListSerializer(many=True)}, tags=['Cart & Orders - Owner'])
     def get(self, request):
-        owner_filter = Q(items__product__market__user=request.user) | Q(
-            items__affiliate__market__user=request.user
+        managed_markets = accessible_markets(request.user, write=True)
+        owner_filter = Q(items__product__market__in=managed_markets) | Q(
+            items__affiliate__market__in=managed_markets
         )
         market_owner_orders = Order.objects.exclude(status=Order.DRAFT).annotate(
             item_count=Count('items', distinct=True),
@@ -192,6 +199,7 @@ class OrderListView(views.APIView):
 class OrderDetailView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(responses={200: OrderSerializer}, tags=['Cart & Orders - Owner'])
     def get(self, request, pk:str):
         try:
             order = Order.objects.get(id=pk)

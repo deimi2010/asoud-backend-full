@@ -9,6 +9,8 @@ from .views import (
     ChatAnalyticsView, ChatSearchView
 )
 
+app_name = 'chat'
+
 # API Router
 router = DefaultRouter()
 router.register(r'rooms', ChatRoomViewSet, basename='chatrooms')
@@ -18,11 +20,11 @@ router.register(r'support/tickets', SupportTicketViewSet, basename='supportticke
 # URL patterns
 urlpatterns = [
     # API endpoints
-    path('api/v1/chat/', include(router.urls)),
+    path('', include(router.urls)),
     
     # Analytics
-    path('api/v1/chat/analytics/', ChatAnalyticsView.as_view(), name='chat-analytics'),
+    path('analytics/', ChatAnalyticsView.as_view(), name='analytics'),
     
     # Search
-    path('api/v1/chat/search/', ChatSearchView.as_view(), name='chat-search'),
+    path('search/', ChatSearchView.as_view(), name='search'),
 ]

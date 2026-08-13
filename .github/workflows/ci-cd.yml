@@ -57,7 +57,7 @@ jobs:
           CORS_ALLOWED_ORIGINS: https://asoud.example
         run: python manage.py check --deploy --tag security
       - name: Generate and validate OpenAPI without a populated database
-        run: python manage.py spectacular --file schema-ci.yml --validate
+        run: python scripts/check_openapi.py --output schema-ci.yml
       - uses: actions/upload-artifact@v4
         with:
           name: openapi-schema

@@ -18,6 +18,7 @@ DISCOUNT_EXPIRED = "Discount Code Expired"
 
 
 class DiscountValidateView(views.APIView):
+    serializer_class = DiscountValidateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):

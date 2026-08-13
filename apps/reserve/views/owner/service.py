@@ -4,6 +4,7 @@ from rest_framework import permissions, status, views
 from rest_framework.response import Response
 
 from apps.market.models import Market
+from apps.market.access import accessible_markets, market_access_filter
 from apps.reserve.models import Reservation, Service
 from apps.reserve.serializers.owner import (
     ServiceCreateSerializer,
@@ -13,15 +14,17 @@ from apps.reserve.serializers.owner import (
 from utils.response import ApiResponse
 
 
-def _owned_services(user):
+def _accessible_services(user, *, write=False):
     return (
-        Service.objects.filter(market__user=user)
+        Service.objects.filter(market_access_filter('market__', user, write=write))
+        .distinct()
         .select_related('market', 'market__sub_category')
         .prefetch_related('market__viewed_by')
     )
 
 
 class ServiceCreateView(views.APIView):
+    serializer_class = ServiceCreateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -29,9 +32,8 @@ class ServiceCreateView(views.APIView):
         serializer = ServiceCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         market = get_object_or_404(
-            Market.objects.select_for_update(),
+            accessible_markets(request.user, write=True).select_for_update(),
             id=serializer.validated_data['market'],
-            user=request.user,
         )
         service = Service.objects.create(
             market=market,
@@ -48,10 +50,11 @@ class ServiceCreateView(views.APIView):
 
 
 class ServiceDetailView(views.APIView):
+    serializer_class = ServiceSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
-        service = get_object_or_404(_owned_services(request.user), id=pk)
+        service = get_object_or_404(_accessible_services(request.user), id=pk)
         return Response(
             ApiResponse(
                 success=True,
@@ -62,6 +65,7 @@ class ServiceDetailView(views.APIView):
 
 
 class ServiceListView(views.APIView):
+    serializer_class = ServiceSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -69,18 +73,19 @@ class ServiceListView(views.APIView):
             ApiResponse(
                 success=True,
                 code=status.HTTP_200_OK,
-                data=ServiceSerializer(_owned_services(request.user), many=True).data,
+                data=ServiceSerializer(_accessible_services(request.user), many=True).data,
             )
         )
 
 
 class ServiceUpdateView(views.APIView):
+    serializer_class = ServiceUpdateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
     def put(self, request, pk):
         service = get_object_or_404(
-            _owned_services(request.user).select_for_update(),
+            _accessible_services(request.user, write=True).select_for_update(),
             id=pk,
         )
         serializer = ServiceUpdateSerializer(service, data=request.data, partial=True)
@@ -96,12 +101,13 @@ class ServiceUpdateView(views.APIView):
 
 
 class ServiceDeleteView(views.APIView):
+    serializer_class = ServiceSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
     def delete(self, request, pk):
         service = get_object_or_404(
-            _owned_services(request.user).select_for_update(),
+            _accessible_services(request.user, write=True).select_for_update(),
             id=pk,
         )
         if Reservation.objects.filter(reserve__service=service).exists():

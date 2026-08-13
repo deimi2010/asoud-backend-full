@@ -5,7 +5,6 @@ from rest_framework.views import APIView
 from rest_framework.generics import GenericAPIView
 from rest_framework.response import Response
 from rest_framework import status
-from drf_spectacular.utils import extend_schema
 from typing import Any, Dict, List, Optional
 from utils.response import ApiResponse
 
@@ -15,12 +14,6 @@ class BaseAPIView(GenericAPIView):
     Base API view with common functionality and DRF Spectacular compatibility
     """
     permission_classes = []
-    
-    def get_serializer_class(self):
-        """
-        Override this method to provide serializer class
-        """
-        return None
     
     def get_queryset(self):
         """
@@ -58,11 +51,6 @@ class BaseListView(BaseAPIView):
     Base list view for listing objects
     """
     
-    @extend_schema(
-        summary="List objects",
-        description="Retrieve a list of objects",
-        responses={200: ApiResponse}
-    )
     def get(self, request, *args, **kwargs):
         """
         List objects
@@ -88,11 +76,6 @@ class BaseDetailView(BaseAPIView):
     Base detail view for retrieving single objects
     """
     
-    @extend_schema(
-        summary="Retrieve object",
-        description="Retrieve a single object by ID",
-        responses={200: ApiResponse, 404: ApiResponse}
-    )
     def get(self, request, pk, *args, **kwargs):
         """
         Retrieve object by ID
@@ -123,12 +106,6 @@ class BaseCreateView(BaseAPIView):
     Base create view for creating objects
     """
     
-    @extend_schema(
-        summary="Create object",
-        description="Create a new object",
-        request=None,  # Will be defined by serializer
-        responses={201: ApiResponse, 400: ApiResponse}
-    )
     def post(self, request, *args, **kwargs):
         """
         Create object
@@ -154,12 +131,6 @@ class BaseUpdateView(BaseAPIView):
     Base update view for updating objects
     """
     
-    @extend_schema(
-        summary="Update object",
-        description="Update an existing object by ID",
-        request=None,  # Will be defined by serializer
-        responses={200: ApiResponse, 400: ApiResponse, 404: ApiResponse}
-    )
     def put(self, request, pk, *args, **kwargs):
         """
         Update object by ID
@@ -194,11 +165,6 @@ class BaseDeleteView(BaseAPIView):
     Base delete view for deleting objects
     """
     
-    @extend_schema(
-        summary="Delete object",
-        description="Delete an object by ID",
-        responses={200: ApiResponse, 404: ApiResponse}
-    )
     def delete(self, request, pk, *args, **kwargs):
         """
         Delete object by ID
@@ -217,5 +183,3 @@ class BaseDeleteView(BaseAPIView):
         
         except Exception as e:
             return self.error_response(f"Error deleting object: {str(e)}", 500)
-
-

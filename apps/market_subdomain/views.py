@@ -4,21 +4,21 @@ from utils.response import ApiResponse
 from apps.market.models import Market
 from apps.market.serializers.user_serializers import MarketListSerializer
 from apps.product.models import Product
-from apps.product.serializers.owner_serializers import (
-    ProductDetailSerializer,
-    ProductListSerializer    
-)
+from apps.flutter.serializers import PublicProductDetailSerializer
+from apps.referral.access import viewable_markets
 
 # Create your views here.
 class MarketDetailView(views.APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request): 
-        host = request.get_host()
-        market_identifier = host.split('.')[0]
-        
+    def get(self, request, market_id=None):
+        market_identifier = market_id or request.get_host().split('.')[0]
+
         try:
-            market = Market.objects.get(business_id=market_identifier)
+            market = viewable_markets(request.user).get(
+                business_id=market_identifier,
+                status=Market.PUBLISHED,
+            )
         except Market.DoesNotExist:
             return Response(
                 ApiResponse(
@@ -38,17 +38,17 @@ class MarketDetailView(views.APIView):
                 data=serializer.data
             )
         )
-        
-
 class ProductListView(views.APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request):
-        host = request.get_host()
-        market_identifier = host.split('.')[0]
+    def get(self, request, market_id=None):
+        market_identifier = market_id or request.get_host().split('.')[0]
 
         try:
-            market = Market.objects.get(business_id=market_identifier)
+            market = viewable_markets(request.user).get(
+                business_id=market_identifier,
+                status=Market.PUBLISHED,
+            )
         except Market.DoesNotExist:
             return Response(
                 ApiResponse(
@@ -59,9 +59,11 @@ class ProductListView(views.APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        products = Product.objects.filter(market=market)
+        products = Product.objects.filter(market=market, status=Product.PUBLISHED)
         
-        serializer = ProductListSerializer(products, many=True)
+        serializer = PublicProductDetailSerializer(
+            products, many=True, context={'request': request}
+        )
 
         return Response(
             ApiResponse(
@@ -73,14 +75,13 @@ class ProductListView(views.APIView):
 
 
 class ProductDetailView(views.APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request, pk):
-        host = request.get_host()
-        market_identifier = host.split('.')[0]
+    def get(self, request, pk, market_id=None):
+        market_identifier = market_id or request.get_host().split('.')[0]
         
         try:
-            product = Product.objects.get(id=pk)
+            product = Product.objects.get(id=pk, status=Product.PUBLISHED)
         except Product.DoesNotExist:
             return Response(
                 ApiResponse(
@@ -92,7 +93,10 @@ class ProductDetailView(views.APIView):
             )
 
         try:
-            market = Market.objects.get(business_id=market_identifier)
+            market = viewable_markets(request.user).get(
+                business_id=market_identifier,
+                status=Market.PUBLISHED,
+            )
         except Market.DoesNotExist:
             return Response(
                 ApiResponse(
@@ -113,7 +117,9 @@ class ProductDetailView(views.APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        serializer = ProductDetailSerializer(product)
+        serializer = PublicProductDetailSerializer(
+            product, context={'request': request}
+        )
 
         return Response(
             ApiResponse(
@@ -122,4 +128,3 @@ class ProductDetailView(views.APIView):
                 data=serializer.data
             )
         )
-        

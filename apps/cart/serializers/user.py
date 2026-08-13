@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from apps.cart.models import (
     Order, 
     OrderItem
@@ -87,6 +88,7 @@ class OrderItemUpdateSerializer(serializers.ModelSerializer):
         model = OrderItem
         fields = ['id', 'quantity', 'item', 'item_type', 'total_price']
     
+    @extend_schema_field(serializers.DictField(allow_null=True))
     def get_item(self, obj):
         if obj.product:
             return Product1Serializer(obj.product).data
@@ -94,6 +96,7 @@ class OrderItemUpdateSerializer(serializers.ModelSerializer):
             return AffiliateProduct1Serializer(obj.affiliate).data
         return None
     
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_item_type(self, obj):
         if obj.product:
             return 'product'
@@ -101,6 +104,7 @@ class OrderItemUpdateSerializer(serializers.ModelSerializer):
             return 'affiliate'
         return None
     
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=3))
     def get_total_price(self, obj):
         return obj.total_price()
     
@@ -153,6 +157,7 @@ class OrderItem1Serializer(serializers.ModelSerializer):
         model = OrderItem
         fields = ['id', 'quantity', 'total_price', 'item', 'item_type']
     
+    @extend_schema_field(serializers.DictField(allow_null=True))
     def get_item(self, obj):
         if obj.product:
             return Product1Serializer(obj.product).data
@@ -160,6 +165,7 @@ class OrderItem1Serializer(serializers.ModelSerializer):
             return AffiliateProduct1Serializer(obj.affiliate).data
         return None
     
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_item_type(self, obj):
         if obj.product:
             return 'product'
@@ -167,6 +173,7 @@ class OrderItem1Serializer(serializers.ModelSerializer):
             return 'affiliate'
         return None
     
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=3))
     def get_total_price(self, obj):
         return obj.total_price()
     
@@ -180,9 +187,11 @@ class Order2Serializer(serializers.ModelSerializer):
         model = Order
         fields = ['id', 'items', 'total_price', 'total_items', 'created_at', 'updated_at']
     
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=3))
     def get_total_price(self, obj):
         return obj.total_price()
     
+    @extend_schema_field(serializers.IntegerField)
     def get_total_items(self, obj):
         return obj.total_items()
     
@@ -207,11 +216,13 @@ class OrderItemSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
     class Meta:
         model = OrderItem
+        ref_name = 'BuyerOrderItem'
         fields = [
             'product_name', 
             'quantity'
         ]
 
+    @extend_schema_field(serializers.CharField)
     def get_product_name(self, obj):
         if obj.product:
             return obj.product.name
@@ -258,6 +269,7 @@ class OrderListSerializer(serializers.ModelSerializer):
             'total'
         ]
 
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=3))
     def get_total(self, obj):
         return obj.total_price()
 
@@ -267,6 +279,7 @@ class OrderSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
+        ref_name = 'BuyerOrder'
         fields = [
             'id', 
             'description', 
@@ -289,6 +302,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'is_paid'
         ]
 
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=3))
     def get_total(self, obj):
         return obj.total_price()
     

@@ -96,6 +96,10 @@ def _otp_cache_key(mobile_number):
     return f"auth:otp:{digest}"
 
 
+def _otp_invite_cache_key(mobile_number):
+    return f"{_otp_cache_key(mobile_number)}:invite"
+
+
 def _otp_cache_available():
     backend = settings.CACHES.get("default", {}).get("BACKEND", "")
     allow_local = getattr(settings, "OTP_ALLOW_LOCAL_CACHE", False)
@@ -128,7 +132,12 @@ def _otp_cache_available():
                     "type": "string",
                     "description": "Iranian mobile number (11 digits starting with 09)",
                     "example": "09123456789",
-                }
+                },
+                "invite_token": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Optional store/app invitation token",
+                },
             },
             "required": ["mobile_number"],
         }
@@ -165,6 +174,7 @@ class PinCreateAPIView(views.APIView):
         return: 200: {}, 400: Validation Error, 500: Server Error
         """
         mobile_number = request.data.get("mobile_number")
+        invite_token = request.data.get("invite_token")
 
         # Validation
         if not mobile_number:
@@ -207,6 +217,21 @@ class PinCreateAPIView(views.APIView):
                 ),
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
+
+        invite = None
+        if invite_token:
+            from apps.referral.services import get_valid_invite
+
+            invite = get_valid_invite(invite_token)
+            if invite is None:
+                return Response(
+                    ApiResponse(
+                        success=False,
+                        code=400,
+                        error={"code": "invalid_invitation", "detail": "Invalid invitation."},
+                    ),
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         issuance_lock_key = f"{_otp_cache_key(mobile_number)}:issuing"
         if not cache.add(issuance_lock_key, True, OTP_ISSUANCE_LOCK_SECONDS):
@@ -251,7 +276,22 @@ class PinCreateAPIView(views.APIView):
                     status=status.HTTP_503_SERVICE_UNAVAILABLE,
                 )
 
-            user_obj, _ = User.objects.get_or_create(mobile_number=mobile_number)
+            user_obj, user_created = User.objects.get_or_create(mobile_number=mobile_number)
+            if invite is not None:
+                cache.set(
+                    _otp_invite_cache_key(mobile_number),
+                    str(invite.token),
+                    OTP_TTL_SECONDS,
+                )
+                if user_created:
+                    from apps.referral.models import SignupInviteIntent
+
+                    SignupInviteIntent.objects.get_or_create(
+                        user=user_obj,
+                        defaults={"invite_link": invite},
+                    )
+            else:
+                cache.delete(_otp_invite_cache_key(mobile_number))
             # Clear legacy plaintext PIN storage. New OTP state lives only as a
             # salted hash in the shared cache with a hard TTL.
             User.objects.filter(id=user_obj.id).update(pin=None, pin_expiry=None)
@@ -373,6 +413,7 @@ class PinVerifyAPIView(views.APIView):
                 raise ValueError("invalid OTP format")
 
             otp_key = _otp_cache_key(str(mobile_number))
+            invite_token = cache.get(_otp_invite_cache_key(str(mobile_number)))
             otp_hash = cache.get(otp_key)
             if not otp_hash or not check_password(pin, otp_hash):
                 attempts_key = f"{otp_key}:attempts"
@@ -394,7 +435,11 @@ class PinVerifyAPIView(views.APIView):
             ):
                 raise ValueError("OTP already consumed")
 
-            cache.delete_many([otp_key, f"{otp_key}:attempts"])
+            cache.delete_many([
+                otp_key,
+                f"{otp_key}:attempts",
+                _otp_invite_cache_key(str(mobile_number)),
+            ])
             with transaction.atomic():
                 user = User.objects.select_for_update().get(mobile_number=mobile_number)
                 if not user.is_active:
@@ -404,6 +449,29 @@ class PinVerifyAPIView(views.APIView):
                 user.pin = None
                 user.pin_expiry = None
                 user.save(update_fields=["pin", "pin_expiry"])
+
+                store_access = None
+                if invite_token:
+                    from apps.referral.models import SignupInviteIntent
+                    from apps.referral.services import accept_store_invite, get_valid_invite
+
+                    invite = get_valid_invite(invite_token, for_update=True)
+                    if invite is not None:
+                        intent = SignupInviteIntent.objects.select_for_update().filter(
+                            user=user,
+                            invite_link=invite,
+                            consumed_at__isnull=True,
+                        ).first()
+                        store_access, _ = accept_store_invite(
+                            user=user,
+                            invite=invite,
+                            allow_referral_attribution=intent is not None,
+                        )
+                        if intent is not None:
+                            from django.utils import timezone
+
+                            intent.consumed_at = timezone.now()
+                            intent.save(update_fields=["consumed_at", "updated_at"])
 
             from apps.analytics.models import AnalyticsEvent
             from apps.analytics.services import AnalyticsRecorder
@@ -417,7 +485,11 @@ class PinVerifyAPIView(views.APIView):
                 ApiResponse(
                     success=True,
                     code=200,
-                    data={"token": token.key},
+                    data={
+                        "token": token.key,
+                        "market_id": str(store_access.market_id) if store_access else None,
+                        "business_id": store_access.market.business_id if store_access else None,
+                    },
                     message="Token has been created successfully",
                 ),
                 status=status.HTTP_200_OK,

@@ -50,6 +50,7 @@ class OwnerInquiryView(views.APIView):
 
 
 class InquiryListView(OwnerInquiryView):
+    serializer_class = InquirySerializer
     def get(self, request):
         inquiries = Inquiry.objects.filter(
             send__isnull=False,
@@ -69,6 +70,7 @@ class InquiryListView(OwnerInquiryView):
 
 
 class InquiryDetailView(OwnerInquiryView):
+    serializer_class = InquirySerializer
     def get(self, request, pk):
         try:
             inquiry = Inquiry.objects.select_related('user').prefetch_related('images').get(
@@ -91,6 +93,7 @@ class InquiryDetailView(OwnerInquiryView):
 
 
 class InquiryAnswerCreateView(OwnerInquiryView):
+    serializer_class = InquiryAnswerCreateSerializer
     @transaction.atomic
     def post(self, request):
         serializer = InquiryAnswerCreateSerializer(data=request.data)
@@ -138,6 +141,7 @@ class InquiryAnswerCreateView(OwnerInquiryView):
 
 
 class InquiryAnswerListView(OwnerInquiryView):
+    serializer_class = InquiryAnswerSerializer
     def get(self, request):
         answers = (
             InquiryAnswer.objects.filter(user=request.user)
@@ -154,6 +158,7 @@ class InquiryAnswerListView(OwnerInquiryView):
 
 
 class InquiryAnswerDetailView(OwnerInquiryView):
+    serializer_class = InquiryAnswerSerializer
     def get(self, request, pk):
         try:
             answer = (

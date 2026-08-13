@@ -4,6 +4,7 @@ Serializers for chat rooms, messages, and support tickets
 """
 
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.conf import settings
@@ -45,10 +46,12 @@ class ChatRoomSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'last_message_at', 'last_activity_at']
     
+    @extend_schema_field(serializers.IntegerField)
     def get_participant_count(self, obj):
         """Get number of participants"""
         return obj.get_participant_count()
     
+    @extend_schema_field(serializers.DictField(allow_null=True))
     def get_last_message(self, obj):
         """Get last message in room"""
         last_message = obj.messages.filter(is_deleted=False).first()
@@ -62,6 +65,7 @@ class ChatRoomSerializer(serializers.ModelSerializer):
             }
         return None
     
+    @extend_schema_field(serializers.IntegerField)
     def get_unread_count(self, obj):
         """Get unread message count for current user"""
         request = self.context.get('request')
@@ -71,6 +75,7 @@ class ChatRoomSerializer(serializers.ModelSerializer):
             return chat_service.get_unread_count(obj, request.user)
         return 0
     
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_created_by_username(self, obj):
         if not obj.created_by:
             return None
@@ -82,10 +87,12 @@ class ChatRoomSerializer(serializers.ModelSerializer):
             return None
         return obj.chat_participants.filter(user=request.user).first()
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_current_user_role(self, obj):
         membership = self._membership(obj)
         return membership.role if membership else None
 
+    @extend_schema_field(serializers.DictField)
     def get_capabilities(self, obj):
         membership = self._membership(obj)
         role = membership.role if membership else None
@@ -229,22 +236,22 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             'is_edited', 'edited_at', 'is_deleted'
         ]
     
-    def get_reply_to_content(self, obj):
+    def get_reply_to_content(self, obj) -> str | None:
         """Get reply to message content"""
         if obj.reply_to:
             return obj.reply_to.content[:100] + '...' if len(obj.reply_to.content) > 100 else obj.reply_to.content
         return None
     
-    def get_reply_to_sender(self, obj):
+    def get_reply_to_sender(self, obj) -> str | None:
         """Get reply to message sender"""
         if obj.reply_to:
             return chat_user_display_name(obj.reply_to.sender)
         return None
 
-    def get_sender_username(self, obj):
+    def get_sender_username(self, obj) -> str:
         return chat_user_display_name(obj.sender)
     
-    def get_file_url(self, obj):
+    def get_file_url(self, obj) -> str | None:
         """Get file URL"""
         if obj.file:
             request = self.context.get('request')
@@ -253,13 +260,13 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             return obj.file.url
         return None
     
-    def get_file_size_mb(self, obj):
+    def get_file_size_mb(self, obj) -> float | None:
         """Get file size in MB"""
         if obj.file_size:
             return round(obj.file_size / (1024 * 1024), 2)
         return None
     
-    def get_read_by(self, obj):
+    def get_read_by(self, obj) -> list[dict]:
         """Get users who have read this message"""
         read_by = ChatMessageRead.objects.filter(message=obj).select_related('user')
         return [
@@ -408,10 +415,10 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             'resolved_at', 'closed_at'
         ]
 
-    def get_user_username(self, obj):
+    def get_user_username(self, obj) -> str:
         return chat_user_display_name(obj.user)
 
-    def get_assigned_to_username(self, obj):
+    def get_assigned_to_username(self, obj) -> str | None:
         if not obj.assigned_to:
             return None
         return chat_user_display_name(obj.assigned_to)
@@ -477,7 +484,7 @@ class ChatAnalyticsSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'last_calculated_at']
     
-    def get_total_file_size_mb(self, obj):
+    def get_total_file_size_mb(self, obj) -> float:
         """Get total file size in MB"""
         if obj.total_file_size:
             return round(obj.total_file_size / (1024 * 1024), 2)

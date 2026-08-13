@@ -20,6 +20,7 @@ class MarketListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Market
+        ref_name = 'PublicMarketList'
         fields = [
             'id',
             'business_id',

@@ -9,12 +9,14 @@ from apps.wallet.serializer import (
     WalletSerializer
 )
 from apps.payment.core import PostPaymentCore
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 # Create your views here.
 
 
 class WalletBalanceView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(responses={200: WalletSerializer}, tags=['Wallet'])
     def get(self, request):
         wallet, _ = Wallet.objects.get_or_create(user=request.user)
         
@@ -31,6 +33,7 @@ class WalletBalanceView(views.APIView):
 class WalletCheckView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(request=WalletCheckSerializer, responses={200: OpenApiResponse(description='Balance is sufficient')}, tags=['Wallet'])
     def post(self, request):
         wallet, _ = Wallet.objects.get_or_create(user=request.user)
         
@@ -64,6 +67,7 @@ class WalletCheckView(views.APIView):
 class WalletPayView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(request=WalletPaySerializer, responses={200: OpenApiResponse(description='Wallet payment completed')}, tags=['Wallet'])
     def post(self, request):
         wallet, _ = Wallet.objects.get_or_create(user=request.user)
         
@@ -102,6 +106,7 @@ class WalletPayView(views.APIView):
 class TransactionListView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(responses={200: TransactionSerializer(many=True)}, tags=['Wallet'])
     def get(self, request):
         transactions = Transaction.objects.filter(user=request.user)
         
@@ -114,4 +119,3 @@ class TransactionListView(views.APIView):
             ),
             status=status.HTTP_200_OK
         )
-

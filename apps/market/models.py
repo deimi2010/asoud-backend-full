@@ -81,6 +81,7 @@ class Market(BaseModel):
 
     business_id = models.CharField(
         max_length=20,
+        unique=True,
         verbose_name=_('Business id'),
     )
 
@@ -162,6 +163,44 @@ class Market(BaseModel):
 
     def __str__(self):
         return self.name
+
+
+class MarketRevision(BaseModel):
+    PENDING = 'pending'
+    APPROVED = 'approved'
+    REJECTED = 'rejected'
+    STATUS_CHOICES = (
+        (PENDING, _('Pending')),
+        (APPROVED, _('Approved')),
+        (REJECTED, _('Rejected')),
+    )
+
+    market = models.ForeignKey(
+        Market,
+        related_name='revisions',
+        on_delete=models.CASCADE,
+    )
+    created_by = models.ForeignKey(
+        User,
+        related_name='market_revisions',
+        on_delete=models.CASCADE,
+    )
+    payload = models.JSONField(default=dict)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=PENDING)
+    reviewed_by = models.ForeignKey(
+        User,
+        related_name='reviewed_market_revisions',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, default='')
+
+    class Meta:
+        indexes = [
+            models.Index(fields=('market', 'status'), name='market_revision_status_idx'),
+        ]
 
 
 class MarketLocation(BaseModel):
@@ -552,3 +591,39 @@ class MarketSchedule(BaseModel):
     def __str__(self):
         day_name = dict(self.DAYS_OF_WEEK).get(self.day_of_week, "Unknown")
         return f"{self.market.name}: {day_name} {self.start_time} - {self.end_time}"
+
+
+class MarketMembership(BaseModel):
+    MANAGER = 'manager'
+    EDITOR = 'editor'
+    VIEWER = 'viewer'
+    ROLE_CHOICES = (
+        (MANAGER, _('Manager')),
+        (EDITOR, _('Editor')),
+        (VIEWER, _('Viewer')),
+    )
+
+    market = models.ForeignKey(
+        Market,
+        related_name='memberships',
+        on_delete=models.CASCADE,
+    )
+    user = models.ForeignKey(
+        User,
+        related_name='market_memberships',
+        on_delete=models.CASCADE,
+    )
+    role = models.CharField(max_length=16, choices=ROLE_CHOICES, default=EDITOR)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'market_membership'
+        constraints = [
+            models.UniqueConstraint(
+                fields=('market', 'user'),
+                name='unique_market_member',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=('user', 'is_active'), name='market_member_active_idx'),
+        ]

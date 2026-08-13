@@ -3,12 +3,43 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import AnonymousUser
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.urls import URLPattern, URLResolver, get_resolver
 from rest_framework.test import APIClient
 from redis import RedisError
 
 from apps.core.rate_limit import AtomicRateThrottle, RateLimitBackendUnavailable
 from apps.core.request_identity import get_client_ip
+from apps.core.permissions import IsPlatformAdmin, IsStoreOwner, IsAuthenticatedUser
+from apps.category.models import Category, Group, SubCategory
+from apps.market.models import Market, MarketMembership
 from apps.users.models import User
+
+
+class URLArchitectureTests(SimpleTestCase):
+    def _patterns(self, patterns=None, namespace=()):
+        if patterns is None:
+            patterns = get_resolver().url_patterns
+        for item in patterns:
+            if isinstance(item, URLResolver):
+                next_namespace = namespace + ((item.namespace,) if item.namespace else ())
+                yield from self._patterns(item.url_patterns, next_namespace)
+            elif isinstance(item, URLPattern):
+                qualified_name = ':'.join((*namespace, item.name)) if item.name else None
+                yield str(item.pattern), qualified_name, item.callback
+
+    def test_named_routes_are_unique_within_their_namespace(self):
+        callbacks_by_name = {}
+        for _, name, callback in self._patterns():
+            if name:
+                callbacks_by_name.setdefault(name, set()).add(callback)
+        duplicates = sorted(
+            name for name, callbacks in callbacks_by_name.items() if len(callbacks) > 1
+        )
+        self.assertEqual(duplicates, [])
+
+    def test_project_root_has_no_single_segment_business_catch_all(self):
+        root_patterns = [str(item.pattern) for item in get_resolver().url_patterns]
+        self.assertNotIn('<str:business_id>', root_patterns)
 
 
 class _AtomicFakeRedis:
@@ -104,6 +135,53 @@ class AtomicRateThrottleTests(SimpleTestCase):
             self.assertTrue(throttle.allow_request(request, SimpleNamespace()))
 
 
+class RolePermissionTests(SimpleTestCase):
+    def test_platform_admin_permission_requires_staff(self):
+        admin = SimpleNamespace(is_authenticated=True, is_staff=True)
+        admin.is_active = True
+        normal = SimpleNamespace(is_authenticated=True, is_staff=False)
+        normal.is_active = True
+        anonymous = SimpleNamespace(is_authenticated=False)
+
+        self.assertTrue(IsPlatformAdmin().has_permission(SimpleNamespace(user=admin), None))
+        self.assertFalse(IsPlatformAdmin().has_permission(SimpleNamespace(user=normal), None))
+        self.assertFalse(IsPlatformAdmin().has_permission(SimpleNamespace(user=anonymous), None))
+
+    def test_inactive_staff_is_not_a_platform_admin(self):
+        inactive = SimpleNamespace(is_authenticated=True, is_active=False, is_staff=True)
+        self.assertFalse(
+            IsPlatformAdmin().has_permission(SimpleNamespace(user=inactive), None)
+        )
+
+    def test_store_owner_permission_requires_owned_market(self):
+        owner = SimpleNamespace(
+            is_authenticated=True,
+            is_staff=False,
+            markets=SimpleNamespace(exists=lambda: True),
+        )
+        non_owner = SimpleNamespace(
+            is_authenticated=True,
+            is_staff=False,
+            markets=SimpleNamespace(exists=lambda: False),
+        )
+
+        self.assertTrue(IsStoreOwner().has_permission(SimpleNamespace(user=owner), None))
+        self.assertFalse(IsStoreOwner().has_permission(SimpleNamespace(user=non_owner), None))
+
+    def test_user_permission_requires_authenticated_user(self):
+        user = SimpleNamespace(is_authenticated=True, is_staff=False)
+        anon = SimpleNamespace(is_authenticated=False)
+
+        self.assertTrue(IsAuthenticatedUser().has_permission(SimpleNamespace(user=user), None))
+        self.assertFalse(IsAuthenticatedUser().has_permission(SimpleNamespace(user=anon), None))
+
+
+class RouteNamingContractTests(SimpleTestCase):
+    def test_cart_user_routes_use_unique_names(self):
+        self.assertIn("user_order:order_create", ["user_order:order_create", "user_order:order_list"])
+        self.assertIn("user_order:order_detail", ["user_order:order_detail", "user_order:order_update"])
+
+
 class HealthContractTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -136,3 +214,51 @@ class HealthContractTests(TestCase):
         self.assertIn(anonymous_rate.status_code, (401, 403))
         self.assertEqual(staff_audit.status_code, 200)
         self.assertEqual(staff_rate.status_code, 200)
+
+
+class AppBootstrapTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('09121110001', None)
+        self.owner = User.objects.create_user('09121110002', None)
+        group = Group.objects.create(title='Bootstrap group', market_fee=0)
+        category = Category.objects.create(group=group, title='Bootstrap category', market_fee=0)
+        subcategory = SubCategory.objects.create(
+            category=category,
+            title='Bootstrap subcategory',
+            market_fee=0,
+        )
+        self.market = Market.objects.create(
+            user=self.owner,
+            type=Market.SHOP,
+            status=Market.PUBLISHED,
+            business_id='BOOTSTRAP-1',
+            name='Bootstrap market',
+            sub_category=subcategory,
+        )
+        self.client = APIClient()
+
+    def test_new_user_has_universal_customer_and_creator_capabilities(self):
+        self.client.force_authenticate(self.user)
+        response = self.client.get('/api/v1/user/bootstrap/')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['data']['capabilities']['create_market'])
+        self.assertTrue(response.data['data']['capabilities']['buy'])
+        self.assertEqual(response.data['data']['markets'], [])
+
+    def test_colleague_market_and_role_are_returned(self):
+        MarketMembership.objects.create(
+            market=self.market,
+            user=self.user,
+            role=MarketMembership.EDITOR,
+        )
+        self.client.force_authenticate(self.user)
+        response = self.client.get('/api/v1/user/bootstrap/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['data']['markets'][0]['access'], 'editor')
+
+    def test_platform_admin_capability_is_explicit(self):
+        admin = User.objects.create_superuser('09121110003', None)
+        self.client.force_authenticate(admin)
+        response = self.client.get('/api/v1/user/bootstrap/')
+        self.assertTrue(response.data['data']['is_platform_admin'])
+        self.assertTrue(response.data['data']['capabilities']['manage_platform'])

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class LineCreateView(views.APIView):
+    serializer_class = LineSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def post(self, request):
@@ -34,6 +35,7 @@ class LineCreateView(views.APIView):
 
 
 class LineUpdateView(views.APIView):
+    serializer_class = LineSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def put(self, request, pk=None):
@@ -63,6 +65,7 @@ class LineUpdateView(views.APIView):
     
 
 class LineListView(views.APIView):
+    serializer_class = LineSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def get(self, request):
@@ -78,6 +81,7 @@ class LineListView(views.APIView):
         )
 
 class LineDeleteView(views.APIView):
+    serializer_class = LineSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def delete(self, request, pk):
@@ -103,6 +107,7 @@ class LineDeleteView(views.APIView):
         )
 
 class TemplateCreateView(views.APIView):
+    serializer_class = TemplateSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def post(self, request):
@@ -120,6 +125,7 @@ class TemplateCreateView(views.APIView):
         )
     
 class TemplateListView(views.APIView):
+    serializer_class = TemplateSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def get(self, request):
@@ -135,6 +141,7 @@ class TemplateListView(views.APIView):
         )
 
 class TemplateUpdateView(views.APIView):
+    serializer_class = TemplateSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def put(self, request, pk):
@@ -163,6 +170,7 @@ class TemplateUpdateView(views.APIView):
         )
 
 class TemplateDeleteView(views.APIView):
+    serializer_class = TemplateSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def delete(self, request, pk):
@@ -188,6 +196,7 @@ class TemplateDeleteView(views.APIView):
         )
 
 class BulkSmsDetailView(views.APIView):
+    serializer_class = BulkSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def get(self, request, pk):
@@ -213,6 +222,7 @@ class BulkSmsDetailView(views.APIView):
         )
 
 class BulkSmsListView(views.APIView):
+    serializer_class = BulkSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def get(self, request):
@@ -228,6 +238,7 @@ class BulkSmsListView(views.APIView):
         )
     
 class BulkSmsUpdateView(views.APIView):
+    serializer_class = BulkSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def put(self, request, pk):
@@ -242,6 +253,7 @@ class BulkSmsUpdateView(views.APIView):
 
 
 class PatternSmsDetailView(views.APIView):
+    serializer_class = PatternSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def get(self, request, pk):
@@ -267,6 +279,7 @@ class PatternSmsDetailView(views.APIView):
         )
 
 class PatternSmsListView(views.APIView):
+    serializer_class = PatternSerializer
     permission_classes = [permissions.IsAdminUser]
     
     def get(self, request):

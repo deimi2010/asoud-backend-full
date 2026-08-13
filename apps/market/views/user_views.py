@@ -8,8 +8,9 @@ from drf_spectacular.types import OpenApiTypes
 
 from utils.response import ApiResponse
 from apps.core.api_optimization import OptimizedAPIView
-from apps.core.caching import cache_result
 from apps.core.performance import QueryProfiler
+from apps.core.permissions import IsAuthenticatedUser
+from apps.referral.access import viewable_markets
 
 from apps.market.models import (
     Market,
@@ -53,6 +54,7 @@ from apps.market.serializers.user_serializers import (
     tags=['Markets - User']
 )
 class MarketListAPIView(OptimizedAPIView):
+    permission_classes = [IsAuthenticatedUser]
     """
     Optimized market list view with performance enhancements.
     
@@ -131,6 +133,8 @@ class MarketListAPIView(OptimizedAPIView):
 
 
 class PublicMarketListAPIView(OptimizedAPIView):
+    serializer_class = MarketListSerializer
+    permission_classes = [IsAuthenticatedUser]
     """
     Optimized public market list view with caching and performance enhancements.
     
@@ -140,9 +144,8 @@ class PublicMarketListAPIView(OptimizedAPIView):
     Attributes:
         permission_classes: [] - No authentication required (public access)
     """
-    permission_classes = []  # Allow any user to access
+    permission_classes = [IsAuthenticatedUser]
     
-    @cache_result(timeout=300, key_prefix="public_markets")
     def get(self, request, format=None):
         with QueryProfiler():
             # Get search and filter parameters
@@ -151,8 +154,8 @@ class PublicMarketListAPIView(OptimizedAPIView):
             verified_only = request.GET.get('verified', 'false').lower() == 'true'
             
             # Build optimized queryset
-            market_list = Market.objects.filter(
-                status=Market.PUBLISHED  # Only show published markets
+            market_list = viewable_markets(request.user).filter(
+                status=Market.PUBLISHED
             ).select_related(
                 'sub_category',
                 'location',
@@ -232,6 +235,7 @@ class PublicMarketListAPIView(OptimizedAPIView):
 
 
 class MarketReportAPIView(views.APIView):
+    serializer_class = MarketReportCreateSerializer
     def post(self, request, pk):
         try:
             market = Market.objects.get(id=pk)

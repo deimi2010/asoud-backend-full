@@ -243,7 +243,7 @@ separate `apps.discount` contract whose eligibility, reservation, snapshot and
 consumption are enforced by cart/payment. Do not reconnect the legacy model.
 
 ## Batch 5l public product detail contract
-`GET /api/v1/products?id={uuid}` is the customer detail boundary. It returns 404
+`GET /api/v1/storefront/products?id={uuid}` is the customer detail boundary. It returns 404
 unless both the product and its market are published, hides owner-only
 colleague/marketer/maximum prices and workflow metadata, and suppresses unpublished
 gift/required products.

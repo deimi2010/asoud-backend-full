@@ -2,10 +2,11 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.users.models import User
+from apps.referral.models import MarketInviteLink
 
 
 class ReferralCreateSerializer(serializers.Serializer):
-    code = serializers.CharField(max_length=15, trim_whitespace=True)
+    code = serializers.CharField(max_length=64, trim_whitespace=True)
 
     def validate_code(self, value):
         if not value:
@@ -44,12 +45,28 @@ class ReferralListSerializer(serializers.ModelSerializer):
 
 class ReferralCreatedDataSerializer(serializers.Serializer):
     id = serializers.UUIDField()
+    market_id = serializers.UUIDField(allow_null=True)
+    business_id = serializers.CharField(allow_null=True)
 
 
 class ReferralCreatedEnvelopeSerializer(serializers.Serializer):
     success = serializers.BooleanField()
     code = serializers.IntegerField()
     data = ReferralCreatedDataSerializer()
+
+
+class MarketInviteCreateSerializer(serializers.Serializer):
+    market_id = serializers.UUIDField()
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+
+
+class MarketInviteSerializer(serializers.ModelSerializer):
+    business_id = serializers.CharField(source='market.business_id', read_only=True)
+
+    class Meta:
+        model = MarketInviteLink
+        fields = ('token', 'market', 'business_id', 'expires_at', 'is_active', 'use_count')
+        read_only_fields = fields
 
 
 class ReferralListEnvelopeSerializer(serializers.Serializer):

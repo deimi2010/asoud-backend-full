@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 
 from apps.category.models import (
     Group, Category, SubCategory,
@@ -69,6 +70,7 @@ class ProductGroupListSerializer(serializers.ModelSerializer):
             'id',
             'sub_category',
         ]
+    @extend_schema_field(serializers.CharField)
     def get_sub_category(self, obj):
         return obj.sub_category.title
 

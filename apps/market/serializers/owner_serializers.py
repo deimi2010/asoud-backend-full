@@ -128,12 +128,12 @@ class MarketListSerializer(serializers.ModelSerializer):
             'view_count',
         ]
 
-    def get_created_at(self, obj):
+    def get_created_at(self, obj) -> str:
         created_at_date = obj.created_at.date()
         jalali_date = jdatetime.date.fromgregorian(date=created_at_date)
         return jalali_date.strftime("%Y/%m/%d")
 
-    def get_inactive_url(self, obj):
+    def get_inactive_url(self, obj) -> str:
         request = self.context.get('request')
         return request.build_absolute_uri(
             reverse(
@@ -142,7 +142,7 @@ class MarketListSerializer(serializers.ModelSerializer):
             )
         )
 
-    def get_queue_url(self, obj):
+    def get_queue_url(self, obj) -> str:
         request = self.context.get('request')
         return request.build_absolute_uri(
             reverse(
@@ -151,10 +151,10 @@ class MarketListSerializer(serializers.ModelSerializer):
             )
         )
 
-    def get_sub_category_title(self, obj):
+    def get_sub_category_title(self, obj) -> str | None:
         return obj.sub_category.title if obj.sub_category else None
 
-    def get_view_count(self, obj):
+    def get_view_count(self, obj) -> int:
         market_viewed_by = obj.viewed_by.all()
         return market_viewed_by.count()
 

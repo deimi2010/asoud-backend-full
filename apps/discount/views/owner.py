@@ -16,6 +16,7 @@ from apps.market.models import Market
 from apps.product.models import Product
 
 class DiscountCreateView(views.APIView):
+    serializer_class = DiscountCreateSerializer
     permission_classes = [permissions.IsAuthenticated]
     @transaction.atomic
     def post(self, request):
@@ -49,7 +50,8 @@ class DiscountCreateView(views.APIView):
         
         # Authorize user
         is_owned = (
-            isinstance(content_object, Market) and content_object.user_id == request.user.id
+            request.user.is_staff
+            or (isinstance(content_object, Market) and content_object.user_id == request.user.id)
         ) or (
             isinstance(content_object, Product)
             and content_object.market.user_id == request.user.id
@@ -95,6 +97,7 @@ class DiscountCreateView(views.APIView):
         )
 
 class DiscountDetailView(views.APIView):
+    serializer_class = DiscountDetailSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request, pk):
@@ -117,7 +120,7 @@ class DiscountDetailView(views.APIView):
             )
         
         # Ownership check
-        if discount.owner != request.user:
+        if not request.user.is_staff and discount.owner_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -142,6 +145,7 @@ class DiscountDetailView(views.APIView):
         )
 
 class DiscountListView(views.APIView):
+    serializer_class = DiscountListSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request):
@@ -149,7 +153,7 @@ class DiscountListView(views.APIView):
         get the list of discounts created by user
         both product and market discounts are returned
         """
-        discounts = Discount.objects.filter(owner=request.user)
+        discounts = Discount.objects.all() if request.user.is_staff else Discount.objects.filter(owner=request.user)
         
         serializer = DiscountListSerializer(discounts, many=True)
 
@@ -163,6 +167,7 @@ class DiscountListView(views.APIView):
         )
 
 class DiscountDeleteView(views.APIView):
+    serializer_class = DiscountDetailSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def delete(self, request, pk):
@@ -186,7 +191,7 @@ class DiscountDeleteView(views.APIView):
             )
         
         # Authorize user
-        if discount.owner != request.user:
+        if not request.user.is_staff and discount.owner_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,

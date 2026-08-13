@@ -89,12 +89,14 @@ class ProductCreateSerializer(serializers.ModelSerializer):
             'ship_cost_pay_type',
             'uploaded_images',
         ]
+        read_only_fields = ('status',)
 
     def create(self, validated_data):
         # remove images 
         images = validated_data.pop('uploaded_images', [])
 
         keywords_data = validated_data.pop('keywords', [])
+        validated_data['status'] = Product.DRAFT
         product = Product.objects.create(**validated_data)
 
         product.keywords.set(keywords_data)
@@ -122,6 +124,15 @@ class ProductCreateSerializer(serializers.ModelSerializer):
             for img in instance.images.all()  # Uses related_name
         ]
         return representation
+
+
+class ProductUpdateSerializer(ProductCreateSerializer):
+    class Meta(ProductCreateSerializer.Meta):
+        fields = [
+            field for field in ProductCreateSerializer.Meta.fields
+            if field not in ('market', 'status', 'uploaded_images')
+        ]
+        read_only_fields = ()
 
 
 class ProductCreateDataSerializer(ProductCreateSerializer):

@@ -6,7 +6,7 @@ from django.urls import resolve
 from rest_framework.test import APIClient
 
 from apps.category.models import Category, Group, SubCategory
-from apps.market.models import Market
+from apps.market.models import Market, MarketMembership
 from apps.reserve.models import DayOff, Reservation, ReserveTime, Service, Specialist
 from apps.reserve.views.user.reservation import (
     ReservationCreateView,
@@ -97,6 +97,36 @@ class ReservationIntegrityTests(TestCase):
         self.market.save(update_fields=['status', 'updated_at'])
 
         self.assertTrue(all(self.client.get(url).status_code == 404 for url in urls))
+
+    def test_colleague_roles_scope_reservation_management(self):
+        MarketMembership.objects.create(
+            market=self.market,
+            user=self.buyer,
+            role=MarketMembership.EDITOR,
+        )
+        self.client.force_authenticate(self.buyer)
+        listing = self.client.get('/api/v1/reservation/owner/service/')
+        updated = self.client.put(
+            f'/api/v1/reservation/owner/service/{self.service.id}/update',
+            {'name': 'Updated by colleague'},
+            format='json',
+        )
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(updated.status_code, 200)
+
+        membership = MarketMembership.objects.get(market=self.market, user=self.buyer)
+        membership.role = MarketMembership.VIEWER
+        membership.save(update_fields=('role', 'updated_at'))
+        forbidden_write = self.client.put(
+            f'/api/v1/reservation/owner/service/{self.service.id}/update',
+            {'name': 'Forbidden'},
+            format='json',
+        )
+        self.assertEqual(forbidden_write.status_code, 404)
+        self.assertEqual(
+            self.client.get('/api/v1/reservation/owner/service/').status_code,
+            200,
+        )
 
     def test_reservation_create_is_server_unpaid_and_validates_relationships(self):
         self.client.force_authenticate(self.buyer)

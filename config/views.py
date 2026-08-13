@@ -7,18 +7,49 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db import connection
 from django.http import JsonResponse
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.views import APIView
 
 logger = logging.getLogger(__name__)
 
+
+class ErrorStatusSerializer(serializers.Serializer):
+    error = serializers.CharField()
+    message = serializers.CharField()
+    code = serializers.CharField()
+
+
+class DependencyStatusSerializer(serializers.Serializer):
+    status = serializers.CharField()
+
+
+class RateLimitStatusSerializer(serializers.Serializer):
+    enabled = serializers.BooleanField()
+    backend = serializers.CharField()
+    configured_scopes = serializers.ListField(child=serializers.CharField())
+
+
+class ApiIndexSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    version = serializers.CharField()
+    status = serializers.CharField()
+
+
+class SecurityAuditSerializer(serializers.Serializer):
+    security_status = serializers.CharField()
+    csrf_protection = serializers.CharField()
+    rate_limiting = serializers.CharField()
+    websocket_query_tokens = serializers.CharField()
+    timestamp = serializers.DateTimeField()
+
 class CSRFFailureView(APIView):
     """
     Enhanced CSRF failure view with proper logging and security
     """
-    
+    serializer_class = ErrorStatusSerializer
+
     def post(self, request):
         """Handle CSRF failure for POST requests"""
         logger.warning(
@@ -79,6 +110,7 @@ class RateLimitView(APIView):
 
     permission_classes = [IsAdminUser]
     throttle_classes = []
+    serializer_class = RateLimitStatusSerializer
 
     def get(self, request):
         return Response(
@@ -94,6 +126,7 @@ class LivenessView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
     throttle_classes = []
+    serializer_class = DependencyStatusSerializer
 
     def get(self, request):
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
@@ -120,6 +153,7 @@ class ReadinessView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
     throttle_classes = []
+    serializer_class = DependencyStatusSerializer
 
     def get(self, request):
         if _dependencies_ready():
@@ -139,6 +173,7 @@ class ApiIndexView(APIView):
     """
     permission_classes = [AllowAny]
     authentication_classes = []
+    serializer_class = ApiIndexSerializer
 
     def get(self, request):
         return Response({
@@ -152,6 +187,7 @@ class SecurityAuditView(APIView):
 
     permission_classes = [IsAdminUser]
     throttle_classes = []
+    serializer_class = SecurityAuditSerializer
     
     def get(self, request):
         """Return security audit information"""
@@ -197,5 +233,4 @@ def rate_limit_view(request):
         },
         status=429
     )
-
 

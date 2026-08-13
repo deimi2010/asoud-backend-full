@@ -8,6 +8,8 @@ from apps.region.serializers.user_serializers import CountryListSerializer, Prov
 
 
 class CountryListAPIView(views.APIView):
+    serializer_class = CountryListSerializer
+
     def get(self, request, format=None):
         country_list = Country.objects.all()
 
@@ -28,6 +30,8 @@ class CountryListAPIView(views.APIView):
 
 
 class ProvinceListAPIView(views.APIView):
+    serializer_class = ProvinceListSerializer
+
     def get(self, request, pk, format=None):
         try:
             country_obj = Country.objects.get(id=pk)
@@ -59,6 +63,8 @@ class ProvinceListAPIView(views.APIView):
 
 
 class CityListAPIView(views.APIView):
+    serializer_class = CityListSerializer
+
     def get(self, request, pk, format=None):
         try:
             province_obj = Province.objects.get(id=pk)

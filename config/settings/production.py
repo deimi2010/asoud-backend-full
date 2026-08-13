@@ -39,7 +39,9 @@ def _csv(name, default=""):
 
 
 DEBUG = False
-ANALYTICS_ENABLED = True
+# Analytics is intentionally fail-closed until its calculations and tenant
+# scoping have passed the production acceptance suite.
+ANALYTICS_ENABLED = False
 ASOUD_RATE_LIMIT_ENABLED = True
 
 SECRET_KEY = _secret("DJANGO_SECRET_KEY", required=True)

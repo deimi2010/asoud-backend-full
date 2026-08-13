@@ -11,10 +11,10 @@ class CommentSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'comment', 'submit_date', 'parent_id', 'level', 'children']
         read_only_fields = fields
 
-    def get_user(self, obj):
+    def get_user(self, obj) -> str | None:
         return str(obj.user_id) if obj.user_id else None
 
-    def get_children(self, obj):
+    def get_children(self, obj) -> list[dict]:
         depth = self.context.get('depth', 1)
         if depth <= 0:
             return []

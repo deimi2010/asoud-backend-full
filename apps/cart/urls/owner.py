@@ -7,16 +7,16 @@ from apps.cart.views.owner import (
 app_name = 'owner_order'
 
 urlpatterns = [
-    path('verify', 
-         OrderVerifyView.as_view(), 
-         name='order-list'
+    path('verify',
+         OrderVerifyView.as_view(),
+         name='owner_order_verify'
     ),
-    path('list', 
-         OrderListView.as_view(), 
-         name='order-create'
+    path('list',
+         OrderListView.as_view(),
+         name='owner_order_list'
     ),
-    path('<str:pk>', 
-         OrderDetailView.as_view(), 
-         name='order-detail'
+    path('<str:pk>',
+         OrderDetailView.as_view(),
+         name='owner_order_detail'
     ),
 ]

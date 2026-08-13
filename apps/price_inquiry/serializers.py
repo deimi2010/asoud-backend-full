@@ -61,12 +61,12 @@ class InquirySerializer(serializers.ModelSerializer):
             'images'
         ]
 
-    def get_expiry(self, obj):
+    def get_expiry(self, obj) -> str:
         _date = obj.expiry
         jalali_date = jdatetime.fromgregorian(date=_date)
         return jalali_date.strftime("%Y/%m/%d %H:%M")
 
-    def get_user(self, obj):
+    def get_user(self, obj) -> dict:
         return {'id': str(obj.user_id)}
 
 class InquiryCreateSerializer(serializers.ModelSerializer):
@@ -161,7 +161,7 @@ class InquiryAnswerSerializer(serializers.ModelSerializer):
             'images',
         ]
 
-    def get_user(self, obj):
+    def get_user(self, obj) -> dict:
         return {'id': str(obj.user_id)}
 
 class InquiryAnswerCreateSerializer(InquiryAnswerSerializer):

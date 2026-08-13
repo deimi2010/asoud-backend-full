@@ -6,9 +6,11 @@ from apps.wallet.serializer import WalletSerializer
 from apps.advertise.models import Advertisement
 from apps.advertise.serializers import AdvertiseSerializer
 from apps.cart.models import Order
+from apps.market.models import Market
 from decimal import Decimal
 
 from apps.core.money import MONEY_DECIMAL_PLACES, MONEY_MAX_DIGITS
+from drf_spectacular.utils import extend_schema_field
 
 class PaymentSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True)
@@ -26,6 +28,7 @@ class PaymentSerializer(serializers.ModelSerializer):
             'created_at',
         ]
 
+    @extend_schema_field(serializers.DictField)
     def get_target(self, obj):
         target_model = obj.target_content_type.model_class()
 
@@ -42,6 +45,7 @@ class PaymentSerializer(serializers.ModelSerializer):
 
         return {'id': str(obj.target_id)}
 
+    @extend_schema_field(serializers.CharField)
     def get_target_content(self, obj):
         target_model = obj.target_content_type.model_class()
 
@@ -72,6 +76,7 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
             'gateway',
         ]
 
+    @extend_schema_field(serializers.DictField)
     def get_target(self, obj):
         target_model = obj.target_content_type.model_class()
 
@@ -88,6 +93,7 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
 
         return {'id': str(obj.target_id)}
     
+    @extend_schema_field(serializers.DictField)
     def get_gateway(self, obj):
         gateway_model = obj.gateway_content_type.model_class()
         if gateway_model == Zarinpal:
@@ -100,6 +106,7 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
                 'name': 'none'
             }
 
+    @extend_schema_field(serializers.CharField)
     def get_target_content(self, obj):
         target_model = obj.target_content_type.model_class()
 
@@ -120,7 +127,7 @@ class PaymentCreateSerializer(serializers.Serializer):
         decimal_places=MONEY_DECIMAL_PLACES,
         min_value=Decimal('1'),
     )
-    target = serializers.ChoiceField(choices=('wallet', 'order'))
+    target = serializers.ChoiceField(choices=('wallet', 'order', 'market_subscription'))
     target_id = serializers.UUIDField()
     gateway = serializers.ChoiceField(choices=('zarinpal',))
 
@@ -141,7 +148,7 @@ class PaymentCreateSerializer(serializers.Serializer):
             except Wallet.DoesNotExist:
                 raise serializers.ValidationError({'target_id': 'Wallet not found.'})
             resolved_amount = attrs['amount']
-        else:
+        elif attrs['target'] == 'order':
             try:
                 target = Order.objects.prefetch_related('items__product', 'items__affiliate').get(
                     id=attrs['target_id'],
@@ -179,8 +186,21 @@ class PaymentCreateSerializer(serializers.Serializer):
             if attrs['amount'] != resolved_amount:
                 raise serializers.ValidationError({'amount': 'Amount does not match the current order total.'})
 
+        else:
+            try:
+                target = Market.objects.select_related('sub_category').get(
+                    id=attrs['target_id'],
+                    user=user,
+                    status__in=(Market.DRAFT, Market.QUEUE, Market.NOT_PUBLISHED, Market.NEEDS_EDITING),
+                )
+            except Market.DoesNotExist:
+                raise serializers.ValidationError({'target_id': 'Publishable store not found.'})
+            resolved_amount = Decimal(str(target.sub_category.market_fee))
+            if resolved_amount <= 0:
+                raise serializers.ValidationError({'amount': 'Store subscription fee is not configured.'})
+            if attrs['amount'] != resolved_amount:
+                raise serializers.ValidationError({'amount': 'Amount does not match the subscription fee.'})
+
         attrs['resolved_target'] = target
         attrs['resolved_amount'] = resolved_amount
         return attrs
-
-

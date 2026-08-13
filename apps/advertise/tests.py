@@ -114,24 +114,30 @@ class AdvertisementIntegrityTests(TestCase):
         listing = self.client.get('/api/v1/advertisements/')
         hidden_detail = self.client.get(f'/api/v1/advertisements/{unpaid.id}')
         paid_detail = self.client.get(f'/api/v1/advertisements/{paid.id}')
-        legacy_hidden = self.client.get(f'/advertisements?id={unpaid.id}')
-        legacy_product = self.client.get(f'/advertisements?id={paid_product.id}')
+        removed_legacy_hidden = self.client.get(f'/advertisements?id={unpaid.id}')
+        removed_legacy_product = self.client.get(f'/advertisements?id={paid_product.id}')
+        product_detail = self.client.get(
+            f'/api/v1/storefront/advertisements?id={paid_product.id}'
+        )
 
         self.assertEqual(listing.status_code, 200)
         self.assertIn(str(paid.id), str(listing.data))
         self.assertNotIn(str(unpaid.id), str(listing.data))
         self.assertEqual(hidden_detail.status_code, 404)
         self.assertEqual(paid_detail.status_code, 200)
-        self.assertEqual(legacy_hidden.status_code, 404)
-        self.assertEqual(legacy_product.status_code, 200)
+        self.assertEqual(removed_legacy_hidden.status_code, 404)
+        self.assertEqual(removed_legacy_product.status_code, 404)
+        self.assertEqual(product_detail.status_code, 200)
         self.assertNotIn(self.other_owner.mobile_number, str(paid_detail.data))
-        self.assertNotIn('colleague_price', str(legacy_product.data))
-        self.assertNotIn('marketer_price', str(legacy_product.data))
-        self.assertNotIn('maximum_sell_price', str(legacy_product.data))
+        self.assertNotIn('colleague_price', str(product_detail.data))
+        self.assertNotIn('marketer_price', str(product_detail.data))
+        self.assertNotIn('maximum_sell_price', str(product_detail.data))
         self.market.status = Market.DRAFT
         self.market.save(update_fields=['status', 'updated_at'])
         self.assertEqual(
-            self.client.get(f'/advertisements?id={paid_product.id}').status_code,
+            self.client.get(
+                f'/api/v1/storefront/advertisements?id={paid_product.id}'
+            ).status_code,
             404,
         )
 

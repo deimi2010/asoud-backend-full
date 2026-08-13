@@ -2,12 +2,13 @@ import logging
 
 from rest_framework import views, viewsets, status, permissions
 from rest_framework.response import Response
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_view
 from utils.response import ApiResponse
 from apps.cart.models import (
     Order,
     OrderItem
 )
+from apps.core.permissions import IsAuthenticatedUser
 from apps.cart.serializers.user import(
     OrderSerializer,
     Order2Serializer,
@@ -71,13 +72,16 @@ def _lock_catalog_target(*, product_id=None, affiliate_id=None):
     return affiliate
 
 
-@extend_schema(
-    summary="Cart Operations",
-    description="Manage user's shopping cart including adding items, updating quantities, and viewing cart contents.",
-    tags=['Cart & Orders - User']
+@extend_schema_view(
+    list=extend_schema(responses={200: Order2Serializer}, tags=['Cart & Orders - User']),
+    add_item=extend_schema(request=OrderItem2Serializer, responses={201: OrderItem2Serializer}, tags=['Cart & Orders - User']),
+    update_item=extend_schema(request=OrderItemUpdateSerializer, responses={200: OrderItem2Serializer}, tags=['Cart & Orders - User']),
+    remove_item=extend_schema(responses={200: Order2Serializer}, tags=['Cart & Orders - User']),
+    checkout=extend_schema(request=OrderCheckOutSerializer, responses={200: Order2Serializer}, tags=['Cart & Orders - User']),
 )
 class CartViewSet(viewsets.ViewSet):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticatedUser]
+    serializer_class = Order2Serializer
     
     def get_order(self, request, lock=False):
         """Helper method to get or create order"""
@@ -251,6 +255,7 @@ class CartViewSet(viewsets.ViewSet):
 class OrderCreateView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+    @extend_schema(request=OrderCreateSerializer, responses={201: OrderSerializer}, tags=['Cart & Orders - User'])
     @transaction.atomic
     def post(self, request):
         serializer = OrderCreateSerializer(data=request.data)
@@ -331,6 +336,7 @@ class OrderDetailView(views.APIView):
     """
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(responses={200: OrderSerializer}, tags=['Cart & Orders - User'])
     def get(self, request, pk:str):
         try:
             # ✅ FIXED: Add ownership check
@@ -380,6 +386,7 @@ class OrderUpdateView(views.APIView):
     """
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(request=OrderCreateSerializer, responses={200: OrderSerializer}, tags=['Cart & Orders - User'])
     @transaction.atomic
     def put(self, request, pk:str):
         try:
@@ -470,6 +477,7 @@ class OrderDeleteView(views.APIView):
     """
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(request=None, responses={204: None}, tags=['Cart & Orders - User'])
     @transaction.atomic
     def delete(self, request, pk:str):
         try:

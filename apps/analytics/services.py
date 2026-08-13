@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import os
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -113,9 +112,9 @@ class AnalyticsService:
 
     def dashboard(self, *, days=30, market_ids=None):
         start, end = self.period(days)
-        orders = Order.objects.filter(is_paid=True, created_at__gte=start, created_at__lt=end)
+        orders = Order.objects.filter(is_paid=True, created_at__gte=start, created_at__lte=end)
         items = OrderItem.objects.filter(order__in=orders)
-        events = AnalyticsEvent.objects.filter(occurred_at__gte=start, occurred_at__lt=end)
+        events = AnalyticsEvent.objects.filter(occurred_at__gte=start, occurred_at__lte=end)
 
         if market_ids is not None:
             market_ids = list(market_ids)
@@ -154,7 +153,6 @@ class AnalyticsService:
         result = []
         for offset in range(int(days) - 1, -1, -1):
             day = (end - timedelta(days=offset)).date()
-            next_day = day + timedelta(days=1)
             orders = Order.objects.filter(is_paid=True, created_at__date=day)
             items = OrderItem.objects.filter(order__in=orders)
             if market_ids is not None:
@@ -181,7 +179,7 @@ class AnalyticsService:
         items = OrderItem.objects.filter(
             order__is_paid=True,
             order__created_at__gte=start,
-            order__created_at__lt=end,
+            order__created_at__lte=end,
         )
         if market_ids is not None:
             items = items.filter(self._item_market_filter(list(market_ids)))
@@ -214,7 +212,7 @@ class AnalyticsService:
             OrderItem.objects.filter(
                 order__is_paid=True,
                 order__created_at__gte=start,
-                order__created_at__lt=end,
+                order__created_at__lte=end,
             )
             .annotate(canonical_market_id=Coalesce('product__market_id', 'affiliate__market_id'))
             .values('canonical_market_id')

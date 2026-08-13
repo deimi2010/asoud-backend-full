@@ -12,6 +12,7 @@ from .models import (
     MarketView,
     MarketDiscount,
     MarketSchedule,
+    MarketRevision,
 )
 
 # Register your models here.
@@ -109,6 +110,13 @@ class MarketAdmin(BaseAdmin):
 
 
 admin.site.register(Market, MarketAdmin)
+
+
+@admin.register(MarketRevision)
+class MarketRevisionAdmin(BaseAdmin):
+    list_display = ('market', 'status', 'created_by', 'reviewed_by', 'created_at')
+    list_filter = ('status',)
+    readonly_fields = BaseAdmin.readonly_fields + ('payload',)
 
 
 class MarketReportAdmin(BaseAdmin):

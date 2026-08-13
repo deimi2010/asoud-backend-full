@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from apps.cart.models import (
     Order,
     OrderItem
@@ -11,11 +12,13 @@ class OrderItemSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
     class Meta:
         model = OrderItem
+        ref_name = 'OwnerOrderItem'
         fields = [
             'product_name', 
             'quantity'
         ]
 
+    @extend_schema_field(serializers.CharField)
     def get_product_name(self, obj):
         if obj.product:
             return obj.product.name
@@ -36,6 +39,7 @@ class OrderListSerializer(serializers.ModelSerializer):
             'total'
         ]
 
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=3))
     def get_total(self, obj):
         return obj.total_price()
 
@@ -46,6 +50,7 @@ class OrderSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
+        ref_name = 'OwnerOrder'
         fields = [
             'id', 
             'description', 
@@ -63,6 +68,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'is_paid'
         ]
 
+    @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=3))
     def get_total(self, obj):
         return obj.total_price()
     

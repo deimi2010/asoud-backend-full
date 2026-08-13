@@ -306,6 +306,33 @@ class Product(BaseModel):
         return self.name
 
 
+class ProductRevision(BaseModel):
+    PENDING = 'pending'
+    APPROVED = 'approved'
+    REJECTED = 'rejected'
+    STATUS_CHOICES = (
+        (PENDING, _('Pending')),
+        (APPROVED, _('Approved')),
+        (REJECTED, _('Rejected')),
+    )
+
+    product = models.ForeignKey(Product, related_name='revisions', on_delete=models.CASCADE)
+    created_by = models.ForeignKey(
+        User, related_name='product_revisions', on_delete=models.CASCADE
+    )
+    payload = models.JSONField(default=dict)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=PENDING)
+    reviewed_by = models.ForeignKey(
+        User, related_name='reviewed_product_revisions', on_delete=models.SET_NULL,
+        null=True, blank=True,
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, default='')
+
+    class Meta:
+        indexes = [models.Index(fields=('product', 'status'), name='product_revision_status_idx')]
+
+
 class ProductShipping(BaseModel):
     product = models.ForeignKey(
         Product,

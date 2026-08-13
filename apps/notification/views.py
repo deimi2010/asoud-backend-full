@@ -4,7 +4,7 @@ API views for notification management
 """
 
 import logging
-from rest_framework import viewsets, status, permissions
+from rest_framework import viewsets, status, permissions, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -28,6 +28,10 @@ from .serializers import (
 from .services import NotificationService, NotificationQueueProcessor
 
 User = get_user_model()
+
+
+class NotificationCleanupSerializer(serializers.Serializer):
+    days = serializers.IntegerField(min_value=1, default=30)
 logger = logging.getLogger(__name__)
 
 
@@ -295,6 +299,7 @@ class NotificationQueueView(APIView):
     View for managing notification queue
     """
     permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+    serializer_class = NotificationQueueSerializer
     
     def get(self, request):
         """Get queued notifications"""
@@ -335,6 +340,7 @@ class NotificationStatsView(APIView):
     View for notification statistics
     """
     permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+    serializer_class = NotificationStatsSerializer
     
     @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     def get(self, request):
@@ -422,6 +428,7 @@ class NotificationCleanupView(APIView):
     View for cleaning up old notifications
     """
     permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+    serializer_class = NotificationCleanupSerializer
     
     def post(self, request):
         """Clean up old notifications"""
@@ -434,4 +441,3 @@ class NotificationCleanupView(APIView):
             'message': f'Cleaned up {deleted_count} old notifications',
             'deleted_count': deleted_count
         })
-

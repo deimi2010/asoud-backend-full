@@ -4,6 +4,7 @@ from rest_framework import permissions, status, views
 from rest_framework.response import Response
 
 from apps.reserve.models import Reservation, ReserveTime, Service
+from apps.market.access import market_access_filter
 from apps.reserve.serializers.owner import (
     ReserveTimeCreateSerializer,
     ReserveTimeSerializer,
@@ -14,7 +15,9 @@ from utils.response import ApiResponse
 
 def _owned_reserve_times(user):
     return (
-        ReserveTime.objects.filter(service__market__user=user)
+        ReserveTime.objects.filter(
+            market_access_filter('service__market__', user)
+        ).distinct()
         .select_related(
             'service',
             'service__market',
@@ -25,15 +28,16 @@ def _owned_reserve_times(user):
 
 
 def _lock_owned_reserve_time(reserve_id, user):
+    access = market_access_filter('service__market__', user, write=True)
     candidate = get_object_or_404(
-        ReserveTime.objects.only('service_id'),
+        ReserveTime.objects.only('service_id').filter(access),
         id=reserve_id,
-        service__market__user=user,
     )
     service = get_object_or_404(
-        Service.objects.select_for_update(),
+        Service.objects.select_for_update().filter(
+            market_access_filter('market__', user, write=True)
+        ),
         id=candidate.service_id,
-        market__user=user,
     )
     return get_object_or_404(
         ReserveTime.objects.select_for_update(),
@@ -43,6 +47,7 @@ def _lock_owned_reserve_time(reserve_id, user):
 
 
 class ReserveTimeCreateView(views.APIView):
+    serializer_class = ReserveTimeCreateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -51,9 +56,10 @@ class ReserveTimeCreateView(views.APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         service = get_object_or_404(
-            Service.objects.select_for_update(),
+            Service.objects.select_for_update().filter(
+                market_access_filter('market__', request.user, write=True)
+            ),
             id=data['service'],
-            market__user=request.user,
         )
         reserve = ReserveTime.objects.filter(service=service, day=data['day']).first()
         response_status = status.HTTP_200_OK
@@ -86,6 +92,7 @@ class ReserveTimeCreateView(views.APIView):
 
 
 class ReserveTimeDetailView(views.APIView):
+    serializer_class = ReserveTimeSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
@@ -100,6 +107,7 @@ class ReserveTimeDetailView(views.APIView):
 
 
 class ReserveTimeListView(views.APIView):
+    serializer_class = ReserveTimeSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -116,6 +124,7 @@ class ReserveTimeListView(views.APIView):
 
 
 class ReserveTimeUpdateView(views.APIView):
+    serializer_class = ReserveTimeUpdateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -147,6 +156,7 @@ class ReserveTimeUpdateView(views.APIView):
 
 
 class ReserveTimeDeleteView(views.APIView):
+    serializer_class = ReserveTimeSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic

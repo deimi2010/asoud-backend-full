@@ -6,6 +6,7 @@ from rest_framework.test import APIClient
 from apps.category.models import Category, Group, SubCategory
 from apps.market.models import Market
 from apps.product.models import Product
+from apps.referral.models import StoreAccess
 from apps.users.models import User
 
 
@@ -32,7 +33,10 @@ class PublicProductDetailTests(TestCase):
             sub_category=self.subcategory,
         )
         self.product = self.create_product('Published product')
+        self.buyer = User.objects.create_user('09125550002', None)
+        StoreAccess.objects.create(user=self.buyer, market=self.market)
         self.client = APIClient()
+        self.client.force_authenticate(self.buyer)
 
     def create_product(self, name, *, status=Product.PUBLISHED, **kwargs):
         return Product.objects.create(
@@ -51,12 +55,12 @@ class PublicProductDetailTests(TestCase):
             **kwargs,
         )
 
-    def test_anonymous_customer_gets_only_public_product_fields(self):
+    def test_authorized_customer_gets_only_public_product_fields(self):
         hidden_gift = self.create_product('Hidden gift', status=Product.DRAFT)
         self.product.gift_product = hidden_gift
         self.product.save(update_fields=['gift_product', 'updated_at'])
 
-        response = self.client.get('/api/v1/products', {'id': self.product.id})
+        response = self.client.get('/api/v1/storefront/products', {'id': self.product.id})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['data']['id'], str(self.product.id))
@@ -69,12 +73,12 @@ class PublicProductDetailTests(TestCase):
 
     def test_unpublished_product_or_market_is_not_public(self):
         draft = self.create_product('Draft product', status=Product.DRAFT)
-        draft_response = self.client.get('/api/v1/products', {'id': draft.id})
+        draft_response = self.client.get('/api/v1/storefront/products', {'id': draft.id})
 
         self.market.status = Market.INACTIVE
         self.market.save(update_fields=['status', 'updated_at'])
         hidden_market_response = self.client.get(
-            '/api/v1/products',
+            '/api/v1/storefront/products',
             {'id': self.product.id},
         )
 
@@ -82,7 +86,12 @@ class PublicProductDetailTests(TestCase):
         self.assertEqual(hidden_market_response.status_code, 404)
 
     def test_invalid_id_is_a_validation_error(self):
-        response = self.client.get('/api/v1/products', {'id': 'not-a-uuid'})
+        response = self.client.get('/api/v1/storefront/products', {'id': 'not-a-uuid'})
 
         self.assertEqual(response.status_code, 400)
         self.assertIn('id', response.data['details'])
+
+    def test_anonymous_customer_cannot_fetch_product_data(self):
+        self.client.force_authenticate(user=None)
+        response = self.client.get('/api/v1/storefront/products', {'id': self.product.id})
+        self.assertEqual(response.status_code, 401)

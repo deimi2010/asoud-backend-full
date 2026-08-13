@@ -1,16 +1,18 @@
-from rest_framework import views, status, permissions
+from rest_framework import views, status
 from rest_framework.response import Response
-from django.utils.translation import gettext_lazy as _
 
 from utils.response import ApiResponse
 
+from apps.core.permissions import IsAuthenticatedUser, IsStoreOwner
 from apps.market.models import (
     Market,
     MarketLocation,
     MarketContact,
     MarketSlider,
     MarketTheme,
+    MarketRevision,
 )
+from apps.market.revisions import json_payload, save_pending_section
 
 from apps.market.serializers.owner_serializers import (
     MarketCreateSerializer,
@@ -25,7 +27,14 @@ from apps.market.serializers.owner_serializers import (
 )
 
 
+def _manageable_markets(user):
+    """Return only markets this identity may administer."""
+    queryset = Market.objects.all()
+    return queryset if user.is_staff else queryset.filter(user=user)
+
+
 class MarketCreateAPIView(views.APIView):
+    serializer_class = MarketCreateSerializer
     """
     API view for creating new markets.
     
@@ -33,9 +42,9 @@ class MarketCreateAPIView(views.APIView):
     with business information, category, and other details.
     
     Attributes:
-        permission_classes: IsAuthenticated - Requires authentication
+        permission_classes: IsAuthenticatedUser - Every account may create its first store
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticatedUser]
     
     def post(self, request):
         user = self.request.user
@@ -66,11 +75,12 @@ class MarketCreateAPIView(views.APIView):
 
 
 class MarketUpdateAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketUpdateSerializer
+    permission_classes = [IsStoreOwner]
     
     def put(self, request, pk):
         try:
-            market = Market.objects.get(id=pk)
+            market = _manageable_markets(request.user).get(id=pk)
 
         except Market.DoesNotExist:
             response = ApiResponse(
@@ -84,7 +94,7 @@ class MarketUpdateAPIView(views.APIView):
             return Response(response, status=status.HTTP_404_NOT_FOUND)
         
         # Ownership check
-        if market.user != request.user:
+        if not request.user.is_staff and market.user_id != request.user.id:
             response = ApiResponse(
                 success=False,
                 code=403,
@@ -103,6 +113,32 @@ class MarketUpdateAPIView(views.APIView):
         )
 
         if serializer.is_valid(raise_exception=True):
+            if market.status == Market.PUBLISHED and not request.user.is_staff:
+                payload = json_payload(serializer.validated_data)
+                revision, _ = MarketRevision.objects.update_or_create(
+                    market=market,
+                    status=MarketRevision.PENDING,
+                    defaults={
+                        'created_by': request.user,
+                        'payload': payload,
+                        'reviewed_by': None,
+                        'reviewed_at': None,
+                        'rejection_reason': '',
+                    },
+                )
+                return Response(
+                    ApiResponse(
+                        success=True,
+                        code=202,
+                        data={
+                            'revision_id': str(revision.id),
+                            'revision_status': revision.status,
+                            'draft': payload,
+                        },
+                        message='Changes saved as a draft and sent for approval.',
+                    ),
+                    status=status.HTTP_202_ACCEPTED,
+                )
             market = serializer.save()
 
             success_response = ApiResponse(
@@ -114,11 +150,12 @@ class MarketUpdateAPIView(views.APIView):
             return Response(success_response, status=status.HTTP_200_OK)
 
 class MarketGetAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketUpdateSerializer
+    permission_classes = [IsStoreOwner]
     
     def get(self, request, pk, format=None):
         try:
-            market = Market.objects.get(id=pk)
+            market = _manageable_markets(request.user).get(id=pk)
 
         except Market.DoesNotExist:
             response = ApiResponse(
@@ -132,7 +169,7 @@ class MarketGetAPIView(views.APIView):
             return Response(response, status=status.HTTP_404_NOT_FOUND)
         
         # Ownership check
-        if market.user != request.user:
+        if not request.user.is_staff and market.user_id != request.user.id:
             response = ApiResponse(
                 success=False,
                 code=403,
@@ -148,24 +185,34 @@ class MarketGetAPIView(views.APIView):
             context={'request': request},
         )
 
+        data = serializer.data
+        pending = market.revisions.filter(status=MarketRevision.PENDING).first()
+        if pending:
+            data = {
+                **data,
+                'pending_revision': {
+                    'id': str(pending.id),
+                    'status': pending.status,
+                    'payload': pending.payload,
+                },
+            }
         success_response = ApiResponse(
             success=True,
             code=200,
-            data=serializer.data,
+            data=data,
             message='Data retrieved successfully.',
         )
         return Response(success_response, status=status.HTTP_200_OK)
 
 
 class MarketListAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketListSerializer
+    permission_classes = [IsStoreOwner]
     
     def get(self, request, format=None):
         user_obj = self.request.user
 
-        market_list = Market.objects.filter(
-            user=user_obj,
-        )
+        market_list = _manageable_markets(user_obj)
 
         serializer = MarketListSerializer(
             market_list,
@@ -184,7 +231,8 @@ class MarketListAPIView(views.APIView):
 
 
 class MarketLocationCreateAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketLocationCreateSerializer
+    permission_classes = [IsStoreOwner]
     
     def post(self, request):
         serializer = MarketLocationCreateSerializer(
@@ -195,7 +243,7 @@ class MarketLocationCreateAPIView(views.APIView):
         if serializer.is_valid(raise_exception=True):
             # Ownership check
             market = serializer.validated_data.get('market')
-            if market.user != request.user:
+            if not request.user.is_staff and market.user_id != request.user.id:
                 return Response(
                     ApiResponse(
                         success=False,
@@ -222,7 +270,7 @@ class MarketLocationCreateAPIView(views.APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            market_location = serializer.save()
+            serializer.save()
 
             success_response = ApiResponse(
                 success=True,
@@ -247,10 +295,11 @@ class MarketLocationCreateAPIView(views.APIView):
 
 
 class MarketLocationUpdateAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketLocationUpdateSerializer
+    permission_classes = [IsStoreOwner]
     def put(self, request, pk):
         try:
-            market = Market.objects.get(id=pk)
+            market = _manageable_markets(request.user).get(id=pk)
             market_location = MarketLocation.objects.get(market=market)
 
         except Market.DoesNotExist:
@@ -276,7 +325,7 @@ class MarketLocationUpdateAPIView(views.APIView):
             return Response(response, status=status.HTTP_404_NOT_FOUND)
 
         # Ownership check
-        if market.user != request.user:
+        if not request.user.is_staff and market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -297,6 +346,17 @@ class MarketLocationUpdateAPIView(views.APIView):
         )
 
         if serializer.is_valid(raise_exception=True):
+            if market.status == Market.PUBLISHED and not request.user.is_staff:
+                revision = save_pending_section(
+                    market=market,
+                    user=request.user,
+                    section='location',
+                    data=serializer.validated_data,
+                )
+                return Response(
+                    {'revision_id': str(revision.id), 'status': revision.status},
+                    status=status.HTTP_202_ACCEPTED,
+                )
             serializer.save()
 
             success_response = ApiResponse(
@@ -308,10 +368,11 @@ class MarketLocationUpdateAPIView(views.APIView):
             return Response(success_response, status=status.HTTP_200_OK)
 
 class MarketLocationGetAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketLocationUpdateSerializer
+    permission_classes = [IsStoreOwner]
     def get(self, request, pk, format=None):
         try:
-            market = Market.objects.get(id=pk)
+            market = _manageable_markets(request.user).get(id=pk)
             market_location = MarketLocation.objects.get(market=market)
 
         except Market.DoesNotExist:
@@ -337,7 +398,7 @@ class MarketLocationGetAPIView(views.APIView):
             return Response(response, status=status.HTTP_404_NOT_FOUND)
 
         # Ownership check
-        if market.user != request.user:
+        if not request.user.is_staff and market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -365,7 +426,8 @@ class MarketLocationGetAPIView(views.APIView):
 
 
 class MarketContactCreateAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketContactCreateSerializer
+    permission_classes = [IsStoreOwner]
     
     def post(self, request):
         serializer = MarketContactCreateSerializer(
@@ -376,7 +438,7 @@ class MarketContactCreateAPIView(views.APIView):
         if serializer.is_valid(raise_exception=True):
             # Ownership check
             market = serializer.validated_data.get('market')
-            if market.user != request.user:
+            if not request.user.is_staff and market.user_id != request.user.id:
                 return Response(
                     ApiResponse(
                         success=False,
@@ -389,7 +451,7 @@ class MarketContactCreateAPIView(views.APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
             
-            market_contact = serializer.save()
+            serializer.save()
 
             success_response = ApiResponse(
                 success=True,
@@ -415,11 +477,12 @@ class MarketContactCreateAPIView(views.APIView):
 
 
 class MarketContactUpdateAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketContactUpdaterSerializer
+    permission_classes = [IsStoreOwner]
     
     def put(self, request, pk):
         try:
-            market = Market.objects.get(id=pk)
+            market = _manageable_markets(request.user).get(id=pk)
             market_contact = MarketContact.objects.get(market=market)
 
         except Market.DoesNotExist:
@@ -445,7 +508,7 @@ class MarketContactUpdateAPIView(views.APIView):
             return Response(response, status=status.HTTP_404_NOT_FOUND)
         
         # Ownership check
-        if market.user != request.user:
+        if not request.user.is_staff and market.user_id != request.user.id:
             response = ApiResponse(
                 success=False,
                 code=403,
@@ -464,6 +527,17 @@ class MarketContactUpdateAPIView(views.APIView):
         )
 
         if serializer.is_valid(raise_exception=True):
+            if market.status == Market.PUBLISHED and not request.user.is_staff:
+                revision = save_pending_section(
+                    market=market,
+                    user=request.user,
+                    section='contact',
+                    data=serializer.validated_data,
+                )
+                return Response(
+                    {'revision_id': str(revision.id), 'status': revision.status},
+                    status=status.HTTP_202_ACCEPTED,
+                )
             serializer.save()
 
             success_response = ApiResponse(
@@ -475,11 +549,12 @@ class MarketContactUpdateAPIView(views.APIView):
             return Response(success_response, status=status.HTTP_200_OK)
 
 class MarketContactGetAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketContactUpdaterSerializer
+    permission_classes = [IsStoreOwner]
     
     def get(self, request, pk, format=None):
         try:
-            market = Market.objects.get(id=pk)
+            market = _manageable_markets(request.user).get(id=pk)
             market_contact = MarketContact.objects.get(market=market)
 
         except Market.DoesNotExist:
@@ -505,7 +580,7 @@ class MarketContactGetAPIView(views.APIView):
             return Response(response, status=status.HTTP_404_NOT_FOUND)
         
         # Ownership check
-        if market.user != request.user:
+        if not request.user.is_staff and market.user_id != request.user.id:
             response = ApiResponse(
                 success=False,
                 code=403,
@@ -531,11 +606,12 @@ class MarketContactGetAPIView(views.APIView):
 
 
 class MarketInactiveAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketUpdateSerializer
+    permission_classes = [IsStoreOwner]
     
-    def get(self, request, pk, format=None):
+    def post(self, request, pk, format=None):
         try:
-            market_obj = Market.objects.get(id=pk)
+            market_obj = _manageable_markets(request.user).get(id=pk)
         except Market.DoesNotExist:
             response = ApiResponse(
                 success=False,
@@ -548,7 +624,7 @@ class MarketInactiveAPIView(views.APIView):
             return Response(response, status=status.HTTP_404_NOT_FOUND)
         
         # Ownership check
-        if market_obj.user != request.user:
+        if not request.user.is_staff and market_obj.user != request.user:
             return Response(
                 ApiResponse(
                     success=False,
@@ -561,8 +637,8 @@ class MarketInactiveAPIView(views.APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        market_obj.status = "inactive"
-        market_obj.save()
+        market_obj.status = Market.INACTIVE
+        market_obj.save(update_fields=['status', 'updated_at'])
 
         success_response = ApiResponse(
             success=True,
@@ -575,11 +651,12 @@ class MarketInactiveAPIView(views.APIView):
 
 
 class MarketQueueAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketUpdateSerializer
+    permission_classes = [IsStoreOwner]
     
-    def get(self, request, pk, format=None):
+    def post(self, request, pk, format=None):
         try:
-            market_obj = Market.objects.get(id=pk)
+            market_obj = _manageable_markets(request.user).get(id=pk)
         except Market.DoesNotExist:
             response = ApiResponse(
                 success=False,
@@ -592,7 +669,7 @@ class MarketQueueAPIView(views.APIView):
             return Response(response, status=status.HTTP_404_NOT_FOUND)
         
         # Ownership check
-        if market_obj.user != request.user:
+        if not request.user.is_staff and market_obj.user != request.user:
             return Response(
                 ApiResponse(
                     success=False,
@@ -605,8 +682,20 @@ class MarketQueueAPIView(views.APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        market_obj.status = "queue"
-        market_obj.save()
+        if market_obj.status not in (Market.DRAFT, Market.NOT_PUBLISHED, Market.NEEDS_EDITING):
+            return Response(
+                ApiResponse(
+                    success=False,
+                    code=409,
+                    error={
+                        'code': 'invalid_market_transition',
+                        'detail': 'This store cannot be queued from its current status.',
+                    },
+                ),
+                status=status.HTTP_409_CONFLICT,
+            )
+        market_obj.status = Market.QUEUE
+        market_obj.save(update_fields=['status', 'updated_at'])
 
         success_response = ApiResponse(
             success=True,
@@ -619,13 +708,14 @@ class MarketQueueAPIView(views.APIView):
 
 
 class MarketLogoAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketListSerializer
+    permission_classes = [IsStoreOwner]
     
     def post(self, request, pk):
         logo_img = request.FILES.get('logo_img')
 
         try:
-            market_obj = Market.objects.get(id=pk)
+            market_obj = _manageable_markets(request.user).get(id=pk)
         except Market.DoesNotExist:
             response = ApiResponse(
                 success=False,
@@ -669,7 +759,7 @@ class MarketLogoAPIView(views.APIView):
 
     def delete(self, request, pk):
         try:
-            market_obj = Market.objects.get(id=pk)
+            market_obj = _manageable_markets(request.user).get(id=pk)
         except Market.DoesNotExist:
             response = ApiResponse(
                 success=False,
@@ -714,13 +804,14 @@ class MarketLogoAPIView(views.APIView):
 
 
 class MarketBackgroundAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketListSerializer
+    permission_classes = [IsStoreOwner]
     
     def post(self, request, pk):
         background_img = request.FILES.get('background_img')
 
         try:
-            market_obj = Market.objects.get(id=pk)
+            market_obj = _manageable_markets(request.user).get(id=pk)
         except Market.DoesNotExist:
             response = ApiResponse(
                 success=False,
@@ -764,7 +855,7 @@ class MarketBackgroundAPIView(views.APIView):
 
     def delete(self, request, pk):
         try:
-            market_obj = Market.objects.get(id=pk)
+            market_obj = _manageable_markets(request.user).get(id=pk)
         except Market.DoesNotExist:
             response = ApiResponse(
                 success=False,
@@ -809,11 +900,12 @@ class MarketBackgroundAPIView(views.APIView):
 
 
 class MarketSliderAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketSliderListSerializer
+    permission_classes = [IsStoreOwner]
     
     def get(self, request, pk):
         try:
-            market_obj = Market.objects.get(id=pk)
+            market_obj = _manageable_markets(request.user).get(id=pk)
         except Market.DoesNotExist:
             response = ApiResponse(
                 success=False,
@@ -860,7 +952,7 @@ class MarketSliderAPIView(views.APIView):
         slider_img = request.FILES.get('slider_img')
 
         try:
-            market_obj = Market.objects.get(id=pk)
+            market_obj = _manageable_markets(request.user).get(id=pk)
         except Market.DoesNotExist:
             response = ApiResponse(
                 success=False,
@@ -919,7 +1011,7 @@ class MarketSliderAPIView(views.APIView):
             return Response(response, status=status.HTTP_404_NOT_FOUND)
         
         # Ownership check
-        if market_slider_obj.market.user != request.user:
+        if not request.user.is_staff and market_slider_obj.market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -959,7 +1051,7 @@ class MarketSliderAPIView(views.APIView):
             return Response(response, status=status.HTTP_404_NOT_FOUND)
         
         # Ownership check
-        if market_slider_obj.market.user != request.user:
+        if not request.user.is_staff and market_slider_obj.market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -994,11 +1086,12 @@ class MarketSliderAPIView(views.APIView):
 
 
 class MarketThemeAPIView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketThemeCreateSerializer
+    permission_classes = [IsStoreOwner]
     
     def post(self, request, pk):
         try:
-            market = Market.objects.get(id=pk)
+            market = _manageable_markets(request.user).get(id=pk)
         except Market.DoesNotExist:
             return Response(
                 ApiResponse(
@@ -1013,7 +1106,7 @@ class MarketThemeAPIView(views.APIView):
             )
         
         # Ownership check
-        if market.user != request.user:
+        if not request.user.is_staff and market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -1040,6 +1133,17 @@ class MarketThemeAPIView(views.APIView):
             )
 
         if serializer.is_valid(raise_exception=True):
+            if market.status == Market.PUBLISHED and not request.user.is_staff:
+                revision = save_pending_section(
+                    market=market,
+                    user=request.user,
+                    section='theme',
+                    data=serializer.validated_data,
+                )
+                return Response(
+                    {'revision_id': str(revision.id), 'status': revision.status},
+                    status=status.HTTP_202_ACCEPTED,
+                )
             serializer.save(market=market)
 
             success_response = ApiResponse(

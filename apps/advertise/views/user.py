@@ -119,6 +119,7 @@ class AdvertiseUpdateView(BaseUpdateView):
 
 class AdvertiseDeleteView(BaseDeleteView):
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = AdvertiseSerializer
 
     def get_queryset(self):
         return Advertisement.objects.filter(user=self.request.user)

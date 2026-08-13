@@ -22,6 +22,7 @@ from apps.affiliate.models import (
 from apps.market.models import Market
 
 class ProductsForAffiliateListView(views.APIView):
+    serializer_class = ProductListSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request):
@@ -55,6 +56,7 @@ class ProductsForAffiliateListView(views.APIView):
         )
 
 class AffiliateProductDetailBeforeCreateView(views.APIView):
+    serializer_class = ProductDetailSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request, pk):
@@ -86,6 +88,7 @@ class AffiliateProductDetailBeforeCreateView(views.APIView):
         )
 
 class AffiliateProductCreateView(views.APIView):
+    serializer_class = AffiliateProductCreateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -146,6 +149,7 @@ class AffiliateProductCreateView(views.APIView):
         )
 
 class AffiliateProductsListView(views.APIView):
+    serializer_class = AffiliateProductListSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request, pk):
@@ -177,6 +181,7 @@ class AffiliateProductsListView(views.APIView):
             )
 
 class AffiliateProductDetailView(views.APIView):
+    serializer_class = AffiliateProductDetailSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request, pk):
@@ -203,6 +208,7 @@ class AffiliateProductDetailView(views.APIView):
         )
 
 class AffiliateProductUpdateView(views.APIView):
+    serializer_class = AffiliateProductCreateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -251,6 +257,7 @@ class AffiliateProductUpdateView(views.APIView):
         )
 
 class AffiliateProductDeleteView(views.APIView):
+    serializer_class = AffiliateProductDetailSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -290,6 +297,7 @@ class AffiliateProductDeleteView(views.APIView):
             )
 
 class AffiliateProductThemeCreateAPIView(views.APIView):
+    serializer_class = AffiliateProductThemeCreateSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -328,6 +336,7 @@ class AffiliateProductThemeCreateAPIView(views.APIView):
             return Response(success_response, status=status.HTTP_201_CREATED)
 
 class AffiliateProductThemeListAPIView(views.APIView):
+    serializer_class = AffiliateProductThemeListSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request, pk):
@@ -361,6 +370,7 @@ class AffiliateProductThemeListAPIView(views.APIView):
         return Response(success_response)
 
 class AffiliateProductThemeUpdateAPIView(views.APIView):
+    serializer_class = AffiliateProductThemeCreateSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     @transaction.atomic
@@ -404,5 +414,4 @@ class AffiliateProductThemeUpdateAPIView(views.APIView):
             message='Affiliate Product theme updated successfully.',
         )
         return Response(success_response, status=status.HTTP_200_OK)
-
 

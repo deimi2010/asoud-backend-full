@@ -52,6 +52,7 @@ class AuthenticatedInquiryView(views.APIView):
 
 
 class InquiryCreateView(AuthenticatedInquiryView):
+    serializer_class = InquiryCreateSerializer
     def post(self, request):
         serializer = InquiryCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -67,6 +68,7 @@ class InquiryCreateView(AuthenticatedInquiryView):
 
 
 class InquiryUpdateView(AuthenticatedInquiryView):
+    serializer_class = InquiryUpdateSerializer
     @transaction.atomic
     def put(self, request, pk=None):
         try:
@@ -90,6 +92,7 @@ class InquiryUpdateView(AuthenticatedInquiryView):
 
 
 class InquiryDeleteView(AuthenticatedInquiryView):
+    serializer_class = InquirySerializer
     @transaction.atomic
     def delete(self, request, pk=None):
         try:
@@ -114,6 +117,7 @@ class InquiryDeleteView(AuthenticatedInquiryView):
 
 
 class InquirySendSetView(AuthenticatedInquiryView):
+    serializer_class = InquirySendSetSerializer
     @transaction.atomic
     def post(self, request, pk):
         try:
@@ -140,6 +144,7 @@ class InquirySendSetView(AuthenticatedInquiryView):
 
 
 class InquiryImageUploadView(AuthenticatedInquiryView):
+    serializer_class = InquiryImageListSerializer
     @transaction.atomic
     def post(self, request, pk):
         try:
@@ -163,6 +168,7 @@ class InquiryImageUploadView(AuthenticatedInquiryView):
 
 
 class InquiryExpiryRenewView(AuthenticatedInquiryView):
+    serializer_class = InquiryExpireSetSerializer
     @transaction.atomic
     def post(self, request, pk):
         try:
@@ -182,6 +188,7 @@ class InquiryExpiryRenewView(AuthenticatedInquiryView):
 
 
 class InquiryListView(AuthenticatedInquiryView):
+    serializer_class = InquirySerializer
     def get(self, request):
         inquiries = (
             Inquiry.objects.filter(user=request.user)
@@ -198,6 +205,7 @@ class InquiryListView(AuthenticatedInquiryView):
 
 
 class InquiryDetailView(AuthenticatedInquiryView):
+    serializer_class = InquirySerializer
     def get(self, request, pk):
         try:
             inquiry = Inquiry.objects.select_related('user').prefetch_related('images').get(
@@ -212,6 +220,7 @@ class InquiryDetailView(AuthenticatedInquiryView):
 
 
 class InquiryAnswerListView(AuthenticatedInquiryView):
+    serializer_class = InquiryAnswerSerializer
     def get(self, request, inquiry_pk):
         if not Inquiry.objects.filter(id=inquiry_pk, user=request.user).exists():
             return _not_found()
@@ -230,6 +239,7 @@ class InquiryAnswerListView(AuthenticatedInquiryView):
 
 
 class InquiryAnswerDetailView(AuthenticatedInquiryView):
+    serializer_class = InquiryAnswerSerializer
     def get(self, request, pk, inquiry_pk):
         try:
             answer = (

@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 from django.utils.translation import gettext_lazy as _
 
+from .logging import LOGGING
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -87,8 +89,8 @@ INSTALLED_APPS = [
     # CORS headers
     'corsheaders',
 
-    # subdomains (disabled)
-    # 'django_hosts',
+    # subdomain storefront routing
+    'django_hosts',
 
     # comment system
     'django.contrib.sites',
@@ -125,6 +127,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 MIDDLEWARE = [
+    'django_hosts.middleware.HostsRequestMiddleware',
     'django_prometheus.middleware.PrometheusBeforeMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
@@ -135,15 +138,15 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    # 'django_hosts.middleware.HostsRequestMiddleware',  # disabled
-    # 'django_hosts.middleware.HostsResponseMiddleware',  # disabled
     'apps.core.database_performance.DatabasePerformanceMiddleware',  # Performance monitoring
     'django_prometheus.middleware.PrometheusAfterMiddleware',
+    'django_hosts.middleware.HostsResponseMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
-# ROOT_HOSTCONF = 'config.hosts'  # disabled
-# DEFAULT_HOST = 'main'  # disabled
+ROOT_HOSTCONF = 'config.hosts'
+DEFAULT_HOST = 'main'
+PARENT_HOST = os.getenv('ASOUD_PARENT_HOST', 'asoud.ir')
 
 TEMPLATES = [
     {
@@ -195,129 +198,6 @@ else:
             'CONN_HEALTH_CHECKS': True,  # Django 4.1+ feature
         }
     }
-
-
-# Password validation
-# https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
-
-AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-        'OPTIONS': {
-            'min_length': 12,
-        }
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
-    {
-        'NAME': 'config.validators.CustomPasswordValidator',
-    },
-]
-
-# Enhanced Logging Configuration
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'verbose': {
-            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
-            'style': '{',
-        },
-        'simple': {
-            'format': '{levelname} {message}',
-            'style': '{',
-        },
-        'detailed': {
-            'format': '{levelname} {asctime} {name} {module} {funcName} {lineno:d} {message}',
-            'style': '{',
-        },
-        'security': {
-            'format': 'SECURITY {levelname} {asctime} {name} {module} {funcName} {lineno:d} {message}',
-            'style': '{',
-        },
-    },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'level': 'INFO',
-            'formatter': 'simple',
-            'stream': 'ext://sys.stdout',
-        },
-        # Temporarily disabled file logging due to permission issues
-        # 'file': {
-        #     'class': 'logging.handlers.RotatingFileHandler',
-        #     'level': 'INFO',
-        #     'formatter': 'verbose',
-        #     'filename': os.path.join(BASE_DIR, 'logs', 'django.log'),
-        #     'maxBytes': 1024 * 1024 * 10,  # 10MB
-        #     'backupCount': 5,
-        # },
-        # 'security_file': {
-        #     'class': 'logging.handlers.RotatingFileHandler',
-        #     'level': 'WARNING',
-        #     'formatter': 'security',
-        #     'filename': os.path.join(BASE_DIR, 'logs', 'security.log'),
-        #     'maxBytes': 1024 * 1024 * 10,  # 10MB
-        #     'backupCount': 10,
-        # },
-        # 'error_file': {
-        #     'class': 'logging.handlers.RotatingFileHandler',
-        #     'level': 'ERROR',
-        #     'formatter': 'detailed',
-        #     'filename': os.path.join(BASE_DIR, 'logs', 'error.log'),
-        #     'maxBytes': 1024 * 1024 * 10,  # 10MB
-        #     'backupCount': 10,
-        # },
-    },
-    'loggers': {
-        'django': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'django.request': {
-            'handlers': ['console'],
-            'level': 'WARNING',
-            'propagate': False,
-        },
-        'django.security': {
-            'handlers': ['console'],
-            'level': 'WARNING',
-            'propagate': False,
-        },
-        'config.security': {
-            'handlers': ['console'],
-            'level': 'WARNING',
-            'propagate': False,
-        },
-        'apps.core': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'apps.users': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'apps.payment': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-    },
-    'root': {
-        'handlers': ['console'],
-        'level': 'INFO',
-    },
-}
 
 
 # Internationalization
@@ -543,7 +423,5 @@ CORS_ALLOWED_HEADERS = [
     'x-requested-with',
 ]
 
-
-# Disable django-hosts temporarily to fix routing (already disabled above)
 
 # (Removed duplicate REST_FRAMEWORK block; keeping the primary one above)

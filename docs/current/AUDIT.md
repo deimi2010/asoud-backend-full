@@ -208,7 +208,7 @@ brings the critical suite to **139 tests**; Flutter removed the pre-product requ
 discount state/events/widget and dead repository/API surface.
 
 **Batch 5l - public product detail honesty (implemented 2026-07-13):** the canonical
-`/api/v1/products?id=` mobile detail route now validates its UUID, exposes only
+`/api/v1/storefront/products?id=` mobile detail route now validates its UUID, exposes only
 products whose market and product are published, suppresses unpublished related
 products and omits owner-only
 prices/workflow fields. Three focused tests are now part of CI and bring the critical

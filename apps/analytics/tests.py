@@ -11,6 +11,7 @@ from apps.cart.models import Order, OrderItem
 from apps.category.models import Category, Group, SubCategory
 from apps.market.models import Market
 from apps.product.models import Product
+from apps.referral.models import StoreAccess
 from apps.users.models import User
 
 from .models import AnalyticsDailyMetric, AnalyticsEvent, MLModelArtifact, UserSession
@@ -34,6 +35,7 @@ class AnalyticsV2Tests(TestCase):
         self.product = self.create_product(self.market, 'Product one', '100.000')
         self.similar = self.create_product(self.market, 'Product similar', '120.000')
         self.other_product = self.create_product(self.other_market, 'Other product', '900.000')
+        StoreAccess.objects.create(user=self.buyer, market=self.market)
         self.client = APIClient()
 
     def create_market(self, owner, business_id):
@@ -217,7 +219,7 @@ class AnalyticsV2Tests(TestCase):
 
     def test_16_product_detail_generates_server_event(self):
         self.client.force_authenticate(self.buyer)
-        response = self.client.get('/api/v1/products', {'id': self.product.id})
+        response = self.client.get('/api/v1/storefront/products', {'id': self.product.id})
         self.assertEqual(response.status_code, 200)
         self.assertTrue(AnalyticsEvent.objects.filter(
             user=self.buyer,

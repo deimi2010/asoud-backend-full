@@ -5,6 +5,7 @@ from apps.product.views.owner_views import (
     ProductDiscountCreateAPIView,
     ProductListAPIView,
     ProductDetailAPIView,
+    ProductUpdateAPIView,
     ProductThemeCreateAPIView,
     ProductThemeListAPIView,
     ProductThemeUpdateAPIView,
@@ -46,6 +47,7 @@ urlpatterns = [
         ProductDetailAPIView.as_view(),
         name='detail',
     ),
+    path('update/<uuid:pk>/', ProductUpdateAPIView.as_view(), name='update'),
     path(
         'theme/create/<uuid:pk>/',
         ProductThemeCreateAPIView.as_view(),

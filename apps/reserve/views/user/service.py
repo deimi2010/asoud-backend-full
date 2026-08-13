@@ -22,6 +22,7 @@ class ServiceQuerySerializer(serializers.Serializer):
 
 
 class ServiceListView(views.APIView):
+    serializer_class = ServiceListSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -49,6 +50,7 @@ class ServiceListView(views.APIView):
 
 
 class SpecialistListView(views.APIView):
+    serializer_class = SpecialistListSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -70,6 +72,7 @@ class SpecialistListView(views.APIView):
 
 
 class ReserveTimeListView(views.APIView):
+    serializer_class = ReserveTimeListSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -99,6 +102,7 @@ class ReserveTimeListView(views.APIView):
 
 
 class DayOffListView(views.APIView):
+    serializer_class = DayoffListSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):

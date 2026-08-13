@@ -25,10 +25,16 @@ from apps.market.views.market_schedule import (
     MarketScheduleUpdateView,
     MarketScheduleDeleteView
 )
+from apps.market.views.membership import (
+    MarketMembershipDetailView,
+    MarketMembershipListCreateView,
+)
 
 app_name = 'market_owner'
 
 urlpatterns = [
+    path('memberships/<uuid:market_id>/', MarketMembershipListCreateView.as_view(), name='membership-list-create'),
+    path('memberships/detail/<uuid:pk>/', MarketMembershipDetailView.as_view(), name='membership-detail'),
     # market itself
     path(
         'create/',

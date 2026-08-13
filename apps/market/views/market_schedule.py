@@ -40,15 +40,17 @@ def _schedule_response(schedule, *, code=status.HTTP_200_OK):
 
 
 def _lock_owned_schedule(*, schedule_id, user):
+    ownership = {} if user.is_staff else {'market__user': user}
     candidate = get_object_or_404(
         MarketSchedule.objects.only('market_id'),
         id=schedule_id,
-        market__user=user,
+        **ownership,
     )
+    market_ownership = {} if user.is_staff else {'user': user}
     market = get_object_or_404(
         Market.objects.select_for_update(),
         id=candidate.market_id,
-        user=user,
+        **market_ownership,
     )
     return get_object_or_404(
         MarketSchedule.objects.select_for_update(),
@@ -74,11 +76,10 @@ class MarketScheduleAPIView(views.APIView):
         serializer = MarketScheduleInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        market = get_object_or_404(
-            Market.objects.select_for_update(),
-            id=data['market'],
-            user=request.user,
-        )
+        markets = Market.objects.select_for_update()
+        if not request.user.is_staff:
+            markets = markets.filter(user=request.user)
+        market = get_object_or_404(markets, id=data['market'])
         day_of_week = data['day'] - 1
         exact = MarketSchedule.objects.filter(
             market=market,
@@ -116,7 +117,9 @@ class MarketScheduleListView(views.APIView):
     def get(self, request):
         query = MarketScheduleListQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
-        schedules = MarketSchedule.objects.filter(market__user=request.user)
+        schedules = MarketSchedule.objects.all()
+        if not request.user.is_staff:
+            schedules = schedules.filter(market__user=request.user)
         if market_id := query.validated_data.get('market'):
             schedules = schedules.filter(market_id=market_id)
         return Response(

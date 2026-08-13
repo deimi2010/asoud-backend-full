@@ -18,6 +18,7 @@ from apps.cart.services import (
     reserve_order_inventory,
 )
 from apps.payment.models import Payment, Zarinpal
+from apps.market.models import Market
 from apps.users.models import User
 from apps.wallet.core import WalletCore
 from apps.wallet.models import Wallet
@@ -312,7 +313,7 @@ class PaymentCore:
                 payment.save(update_fields=['status', 'updated_at'])
         except Zarinpal.DoesNotExist:
             return False, 'No payment found'
-        except (Order.DoesNotExist, Wallet.DoesNotExist, ValueError) as exc:
+        except (Order.DoesNotExist, Wallet.DoesNotExist, Market.DoesNotExist, ValueError) as exc:
             logger.warning('Post-payment processing failed for authority %s: %s', authority, exc)
             return False, str(exc)
 
@@ -363,6 +364,16 @@ class PostPaymentCore:
 
         if target_model is Order:
             self.complete_order(payment.target_id, payment.amount)
+            return
+
+        if target_model is Market:
+            market = Market.objects.select_for_update().get(
+                id=payment.target_id,
+                user=self.user,
+            )
+            if market.status == Market.DRAFT:
+                market.status = Market.QUEUE
+                market.save(update_fields=['status', 'updated_at'])
             return
 
         raise ValueError('Unsupported payment target')

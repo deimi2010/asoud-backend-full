@@ -7,6 +7,7 @@ from utils.response import ApiResponse
 
 from apps.product.serializers.owner_serializers import (
     ProductCreateSerializer,
+    ProductUpdateSerializer,
     ProductCreateEnvelopeSerializer,
     ProductDetailSerializer,
     ProductDetailEnvelopeSerializer,
@@ -21,7 +22,7 @@ from apps.product.serializers.owner_serializers import (
     ProductShipListEnvelopeSerializer,
     ProductShipListSerializer
 )
-from apps.product.models import Product, ProductTheme
+from apps.product.models import Product, ProductRevision, ProductTheme
 from apps.market.models import Market
 from apps.advertise.core  import AdvertisementCore
 
@@ -56,7 +57,7 @@ class ProductCreateAPIView(views.APIView):
         if serializer.is_valid(raise_exception=True):
             # Ownership check - verify market belongs to user
             market = serializer.validated_data.get('market')
-            if market.user != request.user:
+            if not request.user.is_staff and market.user_id != request.user.id:
                 return Response(
                     ApiResponse(
                         success=False,
@@ -119,7 +120,7 @@ class ProductDiscountCreateAPIView(views.APIView):
             )
         
         # Ownership check
-        if product.market.user != request.user:
+        if not request.user.is_staff and product.market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -174,7 +175,7 @@ class ProductShippingCreateAPIView(views.APIView):
             )
         
         # Ownership check
-        if product.market.user != request.user:
+        if not request.user.is_staff and product.market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -224,7 +225,7 @@ class ProductShippingListAPIView(views.APIView):
             )
         
         # Ownership check
-        if product.market.user != request.user:
+        if not request.user.is_staff and product.market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -252,6 +253,7 @@ class ProductShippingListAPIView(views.APIView):
         return Response(success_response, status=status.HTTP_200_OK)
 
 class ProductListAPIView(views.APIView):
+    serializer_class = ProductListSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request, pk):
@@ -271,7 +273,7 @@ class ProductListAPIView(views.APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        if market.user != request.user:
+        if not request.user.is_staff and market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -356,7 +358,7 @@ class ProductDetailAPIView(views.APIView):
             )
         
         # Ownership check
-        if product.market.user != request.user:
+        if not request.user.is_staff and product.market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -384,6 +386,41 @@ class ProductDetailAPIView(views.APIView):
         return Response(success_response, status=status.HTTP_200_OK)
 
 
+class ProductUpdateAPIView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ProductUpdateSerializer
+
+    def put(self, request, pk):
+        try:
+            product = Product.objects.select_related('market').get(pk=pk)
+        except Product.DoesNotExist:
+            return Response({'detail': 'Product not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if not request.user.is_staff and product.market.user_id != request.user.id:
+            return Response({'detail': 'Product not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = ProductUpdateSerializer(product, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        if product.status == Product.PUBLISHED and not request.user.is_staff:
+            payload = {}
+            for key, value in serializer.validated_data.items():
+                if key == 'keywords':
+                    payload[key] = [item.name for item in value]
+                elif hasattr(value, 'pk'):
+                    payload[key] = str(value.pk)
+                else:
+                    payload[key] = str(value) if hasattr(value, 'as_tuple') else value
+            revision, _ = ProductRevision.objects.update_or_create(
+                product=product,
+                status=ProductRevision.PENDING,
+                defaults={'created_by': request.user, 'payload': payload},
+            )
+            return Response(
+                {'revision_id': str(revision.id), 'status': revision.status, 'draft': payload},
+                status=status.HTTP_202_ACCEPTED,
+            )
+        serializer.save()
+        return Response(ProductUpdateSerializer(product).data)
+
+
 class ProductThemeCreateAPIView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -408,7 +445,7 @@ class ProductThemeCreateAPIView(views.APIView):
             )
         
         # Ownership check
-        if market.user != request.user:
+        if not request.user.is_staff and market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -464,7 +501,7 @@ class ProductThemeListAPIView(views.APIView):
             )
         
         # Ownership check
-        if market.user != request.user:
+        if not request.user.is_staff and market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -522,7 +559,7 @@ class ProductThemeUpdateAPIView(views.APIView):
             )
         
         # Ownership check
-        if product_theme.market.user != request.user:
+        if not request.user.is_staff and product_theme.market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,
@@ -544,7 +581,7 @@ class ProductThemeUpdateAPIView(views.APIView):
             )
 
             # Ownership check for product
-            if product.market.user != request.user:
+            if not request.user.is_staff and product.market.user_id != request.user.id:
                 return Response(
                     ApiResponse(
                         success=False,
@@ -596,6 +633,7 @@ class ProductThemeUpdateAPIView(views.APIView):
         return Response(success_response, status=status.HTTP_200_OK)
 
 class ProductThemeDeleteAPIView(views.APIView):
+    serializer_class = ProductThemeUpdateSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def delete(self, request, pk):
@@ -615,7 +653,7 @@ class ProductThemeDeleteAPIView(views.APIView):
             )
         
         # Ownership check
-        if product.market.user != request.user:
+        if not request.user.is_staff and product.market.user_id != request.user.id:
             return Response(
                 ApiResponse(
                     success=False,

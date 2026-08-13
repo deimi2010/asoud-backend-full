@@ -17,7 +17,7 @@ from apps.cart.services import (
 )
 from apps.category.models import Category, Group, SubCategory
 from apps.discount.models import Discount
-from apps.market.models import Market
+from apps.market.models import Market, MarketMembership
 from apps.product.models import Product
 from apps.users.models import User
 from apps.payment.core import (
@@ -88,6 +88,25 @@ class CartIntegrityTests(TestCase):
         data = {'type': Order.ONLINE, 'description': 'placed'}
         data.update(overrides)
         return self.client.post('/api/v1/user/order/checkout', data, format='json')
+
+    def test_store_editor_can_view_order_but_foreign_owner_cannot(self):
+        colleague = User.objects.create_user('09121110004', None)
+        MarketMembership.objects.create(
+            market=self.market,
+            user=colleague,
+            role=MarketMembership.EDITOR,
+        )
+        self.assertEqual(self.add_product(self.product).status_code, 201)
+        self.assertEqual(self.checkout().status_code, 200)
+        order = Order.objects.get(user=self.buyer, status=Order.PENDING)
+
+        self.client.force_authenticate(colleague)
+        allowed = self.client.get(f'/api/v1/owner/order/{order.id}')
+        self.client.force_authenticate(self.other_owner)
+        forbidden = self.client.get(f'/api/v1/owner/order/{order.id}')
+
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(forbidden.status_code, 403)
 
     def test_user_order_detail_update_and_delete_accept_only_the_owner(self):
         own_order = Order.objects.create(

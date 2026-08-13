@@ -4,7 +4,9 @@ from rest_framework import permissions, serializers, status
 from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.utils import extend_schema
 
+from apps.core.permissions import IsAuthenticatedUser, IsPlatformAdmin, IsStoreOwner
 from apps.market.models import Market
 from apps.product.models import Product
 
@@ -44,43 +46,104 @@ class UserSessionSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class AnalyticsDashboardSerializer(serializers.Serializer):
+    period = serializers.DictField()
+    paid_orders = serializers.IntegerField()
+    units_sold = serializers.IntegerField()
+    unique_buyers = serializers.IntegerField()
+    authenticated_unique_product_viewers = serializers.IntegerField()
+    product_views = serializers.IntegerField()
+    add_to_cart_count = serializers.IntegerField()
+    conversion_rate = serializers.FloatField()
+    gross_revenue = serializers.DecimalField(max_digits=18, decimal_places=3)
+    refunds_deducted = serializers.BooleanField()
+    gross_revenue_disclaimer = serializers.CharField()
+
+
+class AnalyticsTimePointSerializer(serializers.Serializer):
+    date = serializers.DateField()
+    paid_orders = serializers.IntegerField()
+    units_sold = serializers.IntegerField()
+    gross_revenue = serializers.DecimalField(max_digits=18, decimal_places=3)
+    refunds_deducted = serializers.BooleanField()
+    gross_revenue_disclaimer = serializers.CharField()
+
+
+class TopProductSerializer(serializers.Serializer):
+    product_id = serializers.UUIDField()
+    name = serializers.CharField()
+    units_sold = serializers.IntegerField()
+    gross_revenue = serializers.DecimalField(max_digits=18, decimal_places=3)
+
+
+class TopMarketSerializer(serializers.Serializer):
+    market_id = serializers.UUIDField()
+    name = serializers.CharField()
+    units_sold = serializers.IntegerField()
+    paid_orders = serializers.IntegerField()
+    gross_revenue = serializers.DecimalField(max_digits=18, decimal_places=3)
+
+
+class AnalyticsProductSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    name = serializers.CharField()
+    market_id = serializers.UUIDField()
+    main_price = serializers.DecimalField(max_digits=18, decimal_places=3)
+
+
+class ProductCollectionSerializer(serializers.Serializer):
+    products = AnalyticsProductSerializer(many=True)
+
+
+class ForecastSerializer(serializers.Serializer):
+    product_id = serializers.UUIDField()
+    forecast = serializers.ListField(child=serializers.DictField())
+
+
 class PlatformDashboardView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [IsPlatformAdmin]
+    serializer_class = AnalyticsDashboardSerializer
 
     def get(self, request):
         return Response(AnalyticsService().dashboard(days=_days(request)))
 
 
 class PlatformTimeSeriesView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [IsPlatformAdmin]
+    serializer_class = AnalyticsTimePointSerializer
 
+    @extend_schema(responses=AnalyticsTimePointSerializer(many=True))
     def get(self, request):
         return Response(AnalyticsService().time_series(days=_days(request)))
 
 
 class PlatformTopProductsView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [IsPlatformAdmin]
+    serializer_class = TopProductSerializer
 
+    @extend_schema(responses=TopProductSerializer(many=True))
     def get(self, request):
         return Response(AnalyticsService().top_products(days=_days(request)))
 
 
 class PlatformTopMarketsView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [IsPlatformAdmin]
+    serializer_class = TopMarketSerializer
 
+    @extend_schema(responses=TopMarketSerializer(many=True))
     def get(self, request):
         return Response(AnalyticsService().top_markets(days=_days(request)))
 
 
 class AnalyticsEventListView(ListAPIView):
-    permission_classes = [IsStaff]
+    permission_classes = [IsPlatformAdmin]
     serializer_class = AnalyticsEventSerializer
     queryset = AnalyticsEvent.objects.select_related('user', 'product', 'market', 'order')
     filterset_fields = ['event_type', 'user', 'product', 'market', 'order']
 
 
 class UserSessionListView(ListAPIView):
-    permission_classes = [IsStaff]
+    permission_classes = [IsPlatformAdmin]
     serializer_class = UserSessionSerializer
     queryset = UserSession.objects.select_related('user')
     filterset_fields = ['user', 'is_active']
@@ -104,7 +167,8 @@ class OwnerScopeMixin:
 
 
 class OwnerSummaryView(OwnerScopeMixin, APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsStoreOwner]
+    serializer_class = AnalyticsDashboardSerializer
 
     def get(self, request):
         market_ids = self.market_ids(request)
@@ -114,8 +178,10 @@ class OwnerSummaryView(OwnerScopeMixin, APIView):
 
 
 class OwnerTimeSeriesView(OwnerScopeMixin, APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsStoreOwner]
+    serializer_class = AnalyticsTimePointSerializer
 
+    @extend_schema(responses=AnalyticsTimePointSerializer(many=True))
     def get(self, request):
         market_ids = self.market_ids(request)
         if market_ids is None:
@@ -124,8 +190,10 @@ class OwnerTimeSeriesView(OwnerScopeMixin, APIView):
 
 
 class OwnerProductsView(OwnerScopeMixin, APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsStoreOwner]
+    serializer_class = TopProductSerializer
 
+    @extend_schema(responses=TopProductSerializer(many=True))
     def get(self, request):
         market_ids = self.market_ids(request)
         if market_ids is None:
@@ -134,7 +202,8 @@ class OwnerProductsView(OwnerScopeMixin, APIView):
 
 
 class OwnerProductForecastView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsStoreOwner]
+    serializer_class = ForecastSerializer
 
     def get(self, request, product_id):
         try:
@@ -148,7 +217,8 @@ class OwnerProductForecastView(APIView):
 
 
 class ProductRecommendationsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticatedUser]
+    serializer_class = ProductCollectionSerializer
 
     def get(self, request):
         return Response({'products': MLService().get_product_recommendations(
@@ -158,7 +228,8 @@ class ProductRecommendationsView(APIView):
 
 
 class SimilarProductsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticatedUser]
+    serializer_class = ProductCollectionSerializer
 
     def get(self, request, product_id):
         try:
@@ -181,7 +252,8 @@ class SimilarProductsView(APIView):
 class DashboardView(APIView):
     """Compatibility dashboard route with explicit staff/owner scoping."""
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticatedUser]
+    serializer_class = AnalyticsDashboardSerializer
 
     def get(self, request):
         service = AnalyticsService()

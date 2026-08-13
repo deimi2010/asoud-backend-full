@@ -12,6 +12,7 @@ from apps.payment.serializers.user import (
     PaymentSerializer,
     PaymentDetailSerializer
 )
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 
 payment = PaymentCore()
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 class PaymentCreateView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(request=PaymentCreateSerializer, responses={201: PaymentDetailSerializer}, tags=['Payments'])
     def post(self, request):
         serializer = PaymentCreateSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
@@ -69,6 +71,7 @@ class PaymentCreateView(views.APIView):
 class PaymentRedirectView(views.APIView):
     permission_classes = [permissions.AllowAny]
     
+    @extend_schema(responses={302: OpenApiResponse(description='Redirect to payment gateway')}, tags=['Payments'])
     def get(self, request):
         zarinpal_id = request.GET.get('id')
         
@@ -132,6 +135,7 @@ class PaymentRedirectView(views.APIView):
 class PaymentVerifyView(views.APIView):
     permission_classes = [permissions.AllowAny]
     
+    @extend_schema(responses={200: OpenApiResponse(description='Payment verified')}, tags=['Payments'])
     def get(self, request):
         try:
             success, data = payment.verify(request)
@@ -175,6 +179,7 @@ class PaymentVerifyView(views.APIView):
 class PaymentListView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(responses={200: PaymentSerializer(many=True)}, tags=['Payments'])
     def get(self, request):
         payments = Payment.objects.filter(user=request.user)
 
@@ -192,6 +197,7 @@ class PaymentListView(views.APIView):
 class PaymentDetailView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
+    @extend_schema(responses={200: PaymentDetailSerializer}, tags=['Payments'])
     def get(self, request, pk):
         try:
             payment = Payment.objects.get(id=pk)
