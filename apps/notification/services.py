@@ -15,7 +15,7 @@ from django.db.models import Q
 
 from .models import (
     Notification, NotificationTemplate, NotificationPreference,
-    NotificationLog, NotificationQueue
+    DeviceInstallation, NotificationLog, NotificationQueue
 )
 
 User = get_user_model()
@@ -402,8 +402,56 @@ class PushNotificationProvider(BaseNotificationProvider):
     
     def send(self, notification: Notification) -> bool:
         """Send push notification via Firebase"""
-        logger.warning("Push provider is not configured")
-        return False
+        from .firebase import firebase_app
+
+        app = firebase_app()
+        if app is None:
+            logger.warning("Push provider is not configured")
+            return False
+        registrations = list(
+            DeviceInstallation.objects.filter(
+                user=notification.user,
+                is_active=True,
+            ).values_list('registration_id', flat=True)
+        )
+        if not registrations:
+            logger.info('No active push installation for user %s', notification.user_id)
+            return True
+
+        from firebase_admin import messaging
+
+        payload = {
+            str(key): str(value)
+            for key, value in notification.data.items()
+            if value is not None
+        }
+        payload.update({
+            'notification_id': str(notification.id),
+            'notification_type': notification.notification_type,
+        })
+        result = messaging.send_each_for_multicast(
+            messaging.MulticastMessage(
+                tokens=registrations,
+                notification=messaging.Notification(
+                    title=notification.title,
+                    body=notification.body,
+                ),
+                data=payload,
+            ),
+            app=app,
+        )
+        invalid = [
+            registrations[index]
+            for index, response in enumerate(result.responses)
+            if not response.success
+            and response.exception.__class__.__name__ == 'UnregisteredError'
+        ]
+        if invalid:
+            DeviceInstallation.objects.filter(registration_id__in=invalid).update(
+                is_active=False,
+                updated_at=timezone.now(),
+            )
+        return result.success_count > 0 or bool(invalid)
 
 
 class EmailNotificationProvider(BaseNotificationProvider):
@@ -537,4 +585,3 @@ class NotificationQueueProcessor:
         
         logger.info(f"Cleaned up {deleted_count} old notifications")
         return deleted_count
-

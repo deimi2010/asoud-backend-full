@@ -15,7 +15,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 
 from .models import (
-    Notification, NotificationTemplate, NotificationPreference,
+    DeviceInstallation, Notification, NotificationTemplate, NotificationPreference,
     NotificationQueue
 )
 from .serializers import (
@@ -23,7 +23,7 @@ from .serializers import (
     NotificationPreferenceSerializer, NotificationCreateSerializer,
     NotificationUpdateSerializer, NotificationQueueSerializer, NotificationStatsSerializer,
     NotificationTemplateCreateSerializer, NotificationPreferenceUpdateSerializer,
-    BulkNotificationSerializer
+    BulkNotificationSerializer, DeviceInstallationSerializer
 )
 from .services import NotificationService, NotificationQueueProcessor
 
@@ -32,6 +32,21 @@ User = get_user_model()
 
 class NotificationCleanupSerializer(serializers.Serializer):
     days = serializers.IntegerField(min_value=1, default=30)
+
+
+class DeviceInstallationViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = DeviceInstallationSerializer
+    http_method_names = ['get', 'post', 'delete', 'head', 'options']
+    lookup_value_converter = 'uuid'
+    lookup_value_regex = '[0-9a-fA-F-]{36}'
+
+    def get_queryset(self):
+        return DeviceInstallation.objects.filter(user=self.request.user).order_by('-last_seen_at')
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save(update_fields=['is_active', 'updated_at'])
 logger = logging.getLogger(__name__)
 
 

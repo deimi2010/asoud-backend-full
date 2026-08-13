@@ -2,13 +2,13 @@
 Tests for notification app
 """
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework.test import APITestCase, APIRequestFactory, force_authenticate
 from rest_framework import status
 
-from .models import Notification, NotificationQueue
+from .models import DeviceInstallation, Notification, NotificationQueue
 from .services import NotificationService, PushNotificationProvider
 from .views import NotificationViewSet
 from unittest.mock import Mock, patch
@@ -42,6 +42,29 @@ class NotificationContainmentTests(TestCase):
 
     def test_unconfigured_push_provider_reports_failure(self):
         self.assertFalse(PushNotificationProvider().send(Mock()))
+
+    @override_settings(FIREBASE_ENABLED=True)
+    @patch('firebase_admin.messaging.send_each_for_multicast')
+    @patch('apps.notification.firebase.firebase_app', return_value=Mock())
+    def test_push_provider_sends_to_user_devices(self, _, send):
+        DeviceInstallation.objects.create(
+            user=self.user,
+            registration_id='device-token',
+            platform=DeviceInstallation.ANDROID,
+        )
+        notification = Notification.objects.create(
+            user=self.user,
+            notification_type='security_alert',
+            channel='push',
+            title='Security',
+            body='Review account',
+        )
+        send.return_value = Mock(success_count=1, responses=[Mock(success=True)])
+
+        self.assertTrue(PushNotificationProvider().send(notification))
+        message = send.call_args.args[0]
+        self.assertEqual(message.tokens, ['device-token'])
+        self.assertEqual(message.data['notification_id'], str(notification.id))
 
     @patch.object(NotificationService, '_process_notification', return_value=True)
     @patch.object(NotificationService, '_create_notification')
@@ -196,3 +219,35 @@ class NotificationAPITests(APITestCase):
             self.assertEqual(len(response.data['results']), 1)
         else:
             self.assertEqual(len(response.data), 1)
+
+    def test_device_registration_is_upserted_and_owner_scoped(self):
+        created = self.client.post(
+            '/api/v1/devices/',
+            {
+                'registration_id': 'installation-token',
+                'platform': 'android',
+                'app_version': '1.0.0',
+            },
+            format='json',
+        )
+        other = User.objects.create_user('09120000999', None)
+        self.client.force_authenticate(other)
+        moved = self.client.post(
+            '/api/v1/devices/',
+            {
+                'registration_id': 'installation-token',
+                'platform': 'android',
+                'app_version': '1.0.1',
+            },
+            format='json',
+        )
+        self.client.force_authenticate(self.user)
+        listing = self.client.get('/api/v1/devices/')
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(moved.status_code, 201)
+        self.assertEqual(listing.data['count'], 0)
+        installation = DeviceInstallation.objects.get(
+            registration_id='installation-token'
+        )
+        self.assertEqual(installation.user, other)

@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import AnonymousUser
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.test.client import RequestFactory
 from django.urls import URLPattern, URLResolver, get_resolver
 from rest_framework.test import APIClient
 from redis import RedisError
@@ -13,6 +14,30 @@ from apps.core.permissions import IsPlatformAdmin, IsStoreOwner, IsAuthenticated
 from apps.category.models import Category, Group, SubCategory
 from apps.market.models import Market, MarketMembership
 from apps.users.models import User
+from apps.core.firebase_app_check import FirebaseAppCheckMiddleware
+
+
+class FirebaseAppCheckMiddlewareTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.middleware = FirebaseAppCheckMiddleware(lambda request: SimpleNamespace(status_code=200))
+
+    @override_settings(FIREBASE_APP_CHECK_ENFORCED=True)
+    def test_missing_token_is_rejected_for_versioned_api(self):
+        response = self.middleware(self.factory.get('/api/v1/user/bootstrap/'))
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(FIREBASE_APP_CHECK_ENFORCED=True)
+    @patch('apps.core.firebase_app_check.verify_app_check_token')
+    def test_valid_token_reaches_api(self, verify):
+        verify.return_value = {'app_id': 'test-app'}
+        request = self.factory.get(
+            '/api/v1/user/bootstrap/',
+            HTTP_X_FIREBASE_APPCHECK='valid-token',
+        )
+        response = self.middleware(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(request.firebase_app['app_id'], 'test-app')
 
 
 class URLArchitectureTests(SimpleTestCase):

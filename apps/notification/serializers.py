@@ -8,10 +8,36 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from .models import (
     Notification, NotificationTemplate, NotificationPreference,
-    NotificationLog, NotificationQueue
+    DeviceInstallation, NotificationLog, NotificationQueue
 )
 
 User = get_user_model()
+
+
+class DeviceInstallationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DeviceInstallation
+        fields = [
+            'id', 'registration_id', 'platform', 'app_version',
+            'is_active', 'last_seen_at',
+        ]
+        read_only_fields = ['id', 'is_active', 'last_seen_at']
+        extra_kwargs = {
+            'registration_id': {'write_only': True, 'validators': []},
+        }
+
+    def create(self, validated_data):
+        installation, _ = DeviceInstallation.objects.update_or_create(
+            registration_id=validated_data['registration_id'],
+            defaults={
+                'user': self.context['request'].user,
+                'platform': validated_data['platform'],
+                'app_version': validated_data.get('app_version', ''),
+                'is_active': True,
+                'last_seen_at': timezone.now(),
+            },
+        )
+        return installation
 
 
 class NotificationTemplateSerializer(serializers.ModelSerializer):
@@ -333,4 +359,3 @@ class BulkNotificationSerializer(serializers.Serializer):
             raise serializers.ValidationError(f"Users not found: {list(missing_ids)}")
         
         return value
-

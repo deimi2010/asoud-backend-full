@@ -15,6 +15,29 @@ import uuid
 User = get_user_model()
 
 
+class DeviceInstallation(BaseModel):
+    ANDROID = 'android'
+    IOS = 'ios'
+    WEB = 'web'
+    PLATFORM_CHOICES = ((ANDROID, 'Android'), (IOS, 'iOS'), (WEB, 'Web'))
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='device_installations'
+    )
+    registration_id = models.CharField(max_length=4096, unique=True)
+    platform = models.CharField(max_length=10, choices=PLATFORM_CHOICES)
+    app_version = models.CharField(max_length=32, blank=True)
+    is_active = models.BooleanField(default=True)
+    last_seen_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'notification_device_installation'
+        indexes = [models.Index(fields=['user', 'is_active'])]
+
+    def __str__(self):
+        return f'{self.user_id}:{self.platform}'
+
+
 class NotificationTemplate(BaseModel):
     """
     Template for different types of notifications

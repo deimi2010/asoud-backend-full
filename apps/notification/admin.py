@@ -8,8 +8,16 @@ from django.urls import reverse
 from django.utils import timezone
 from .models import (
     Notification, NotificationTemplate, NotificationPreference,
-    NotificationLog, NotificationQueue
+    DeviceInstallation, NotificationLog, NotificationQueue
 )
+
+
+@admin.register(DeviceInstallation)
+class DeviceInstallationAdmin(admin.ModelAdmin):
+    list_display = ['user', 'platform', 'app_version', 'is_active', 'last_seen_at']
+    list_filter = ['platform', 'is_active']
+    search_fields = ['user__mobile_number']
+    readonly_fields = ['registration_id', 'last_seen_at', 'created_at', 'updated_at']
 
 
 @admin.register(NotificationTemplate)

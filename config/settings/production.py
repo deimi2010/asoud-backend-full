@@ -44,6 +44,11 @@ DEBUG = False
 ANALYTICS_ENABLED = False
 ASOUD_RATE_LIMIT_ENABLED = True
 
+if FIREBASE_APP_CHECK_ENFORCED and not FIREBASE_ENABLED:  # noqa: F405
+    raise ImproperlyConfigured(
+        'FIREBASE_ENABLED must be true before enforcing Firebase App Check.'
+    )
+
 SECRET_KEY = _secret("DJANGO_SECRET_KEY", required=True)
 ASOUD_RATE_LIMIT_KEY_SECRET = _secret(
     "ASOUD_RATE_LIMIT_KEY_SECRET",

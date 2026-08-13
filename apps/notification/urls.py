@@ -4,7 +4,8 @@ from apps.notification.consumers import NotificationConsumer
 from .views import (
     NotificationViewSet, NotificationTemplateViewSet,
     NotificationPreferenceViewSet, BulkNotificationView,
-    NotificationQueueView, NotificationStatsView, NotificationCleanupView
+    NotificationQueueView, NotificationStatsView, NotificationCleanupView,
+    DeviceInstallationViewSet,
 )
 
 app_name = 'notification'
@@ -19,6 +20,7 @@ router = DefaultRouter()
 router.register(r'notifications', NotificationViewSet, basename='notifications')
 router.register(r'templates', NotificationTemplateViewSet, basename='templates')
 router.register(r'preferences', NotificationPreferenceViewSet, basename='preferences')
+router.register(r'devices', DeviceInstallationViewSet, basename='devices')
 
 # API URL patterns
 urlpatterns = [

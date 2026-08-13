@@ -136,6 +136,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',  # Re-enabled CSRF
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'apps.core.firebase_app_check.FirebaseAppCheckMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'apps.core.database_performance.DatabasePerformanceMiddleware',  # Performance monitoring
@@ -239,6 +240,15 @@ SMS_MOCK_SEND = False
 OTP_ALLOW_LOCAL_CACHE = False
 ASOUD_TOKEN_TTL_SECONDS = int(os.environ.get('ASOUD_TOKEN_TTL_SECONDS', 30 * 24 * 60 * 60))
 ASOUD_WS_TICKET_TTL_SECONDS = int(os.environ.get('ASOUD_WS_TICKET_TTL_SECONDS', 60))
+FIREBASE_ENABLED = os.environ.get('FIREBASE_ENABLED', 'false').lower() == 'true'
+FIREBASE_PROJECT_ID = os.environ.get('FIREBASE_PROJECT_ID', '')
+FIREBASE_APP_CHECK_ENFORCED = (
+    os.environ.get('FIREBASE_APP_CHECK_ENFORCED', 'false').lower() == 'true'
+)
+FIREBASE_APP_CHECK_EXEMPT_PATHS = (
+    '/admin/', '/api/schema/', '/api/docs/', '/api/v1/health/',
+    '/health/', '/livez', '/readyz',
+)
 
 # Forwarded client IPs are trusted only when the direct peer is in this list.
 # The edge proxy must overwrite X-Real-IP and remove inbound copies.
