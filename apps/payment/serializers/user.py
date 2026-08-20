@@ -126,6 +126,7 @@ class PaymentCreateSerializer(serializers.Serializer):
         max_digits=MONEY_MAX_DIGITS,
         decimal_places=MONEY_DECIMAL_PLACES,
         min_value=Decimal('1'),
+        required=False,
     )
     target = serializers.ChoiceField(choices=('wallet', 'order', 'market_subscription'))
     target_id = serializers.UUIDField()
@@ -143,12 +144,16 @@ class PaymentCreateSerializer(serializers.Serializer):
 
         user = request.user
         if attrs['target'] == 'wallet':
+            if 'amount' not in attrs:
+                raise serializers.ValidationError({'amount': 'This field is required.'})
             try:
                 target = Wallet.objects.get(id=attrs['target_id'], user=user)
             except Wallet.DoesNotExist:
                 raise serializers.ValidationError({'target_id': 'Wallet not found.'})
             resolved_amount = attrs['amount']
         elif attrs['target'] == 'order':
+            if 'amount' not in attrs:
+                raise serializers.ValidationError({'amount': 'This field is required.'})
             try:
                 target = Order.objects.prefetch_related('items__product', 'items__affiliate').get(
                     id=attrs['target_id'],
@@ -195,6 +200,14 @@ class PaymentCreateSerializer(serializers.Serializer):
                 )
             except Market.DoesNotExist:
                 raise serializers.ValidationError({'target_id': 'Publishable store not found.'})
+            if not hasattr(target, 'contact') or not hasattr(target, 'location'):
+                raise serializers.ValidationError(
+                    {'target_id': 'Store information must be completed before payment.'}
+                )
+            if target.is_paid:
+                raise serializers.ValidationError(
+                    {'target_id': 'Store subscription is already paid.'}
+                )
             resolved_amount = Decimal(str(target.sub_category.market_fee))
             if resolved_amount <= 0:
                 raise serializers.ValidationError({'amount': 'Store subscription fee is not configured.'})

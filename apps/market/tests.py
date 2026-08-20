@@ -3,16 +3,40 @@ from datetime import time
 from django.db import connection
 from django.test import TestCase, skipUnlessDBFeature
 from django.test.utils import CaptureQueriesContext
+from rest_framework import serializers
 from rest_framework.test import APIClient
 
 from apps.category.models import Category, Group, SubCategory
 from apps.market.models import (
-    Market, MarketBookmark, MarketLocation, MarketMembership, MarketRevision,
+    Market, MarketBookmark, MarketContact, MarketLocation, MarketMembership, MarketRevision,
     MarketSchedule, MarketTheme,
 )
+from apps.market.serializers.owner_serializers import MarketCreateSerializer
 from apps.region.models import City, Country, Province
 from apps.reserve.models import Service
 from apps.users.models import User
+
+
+class MarketBusinessIdValidationTests(TestCase):
+    def setUp(self):
+        self.serializer = MarketCreateSerializer()
+
+    def test_normalizes_valid_subdomain_label(self):
+        self.assertEqual(
+            self.serializer.validate_business_id('  My-Shop  '),
+            'my-shop',
+        )
+
+    def test_rejects_non_latin_or_invalid_hyphens(self):
+        for value in ('فروشگاه', '-my-shop', 'my--shop', 'shop-'):
+            with self.subTest(value=value), self.assertRaises(
+                serializers.ValidationError
+            ):
+                self.serializer.validate_business_id(value)
+
+    def test_accepts_dns_label_maximum_length(self):
+        value = 'a' + ('1' * 62)
+        self.assertEqual(self.serializer.validate_business_id(value), value)
 
 
 class MarketRevisionWorkflowTests(TestCase):
@@ -74,7 +98,31 @@ class MarketRevisionWorkflowTests(TestCase):
         self.assertEqual(post_response.status_code, 409)
 
         self.market.status = Market.DRAFT
-        self.market.save(update_fields=['status', 'updated_at'])
+        self.market.is_paid = False
+        self.market.save(update_fields=['status', 'is_paid', 'updated_at'])
+        unpaid = self.client.post(f'/api/v1/owner/market/queue/{self.market.id}/')
+        self.assertEqual(unpaid.status_code, 409)
+
+        self.market.is_paid = True
+        self.market.save(update_fields=['status', 'is_paid', 'updated_at'])
+        incomplete = self.client.post(f'/api/v1/owner/market/queue/{self.market.id}/')
+        self.assertEqual(incomplete.status_code, 409)
+
+        MarketContact.objects.create(
+            market=self.market,
+            first_mobile_number=self.owner.mobile_number,
+        )
+        country = Country.objects.create(name='Iran queue')
+        province = Province.objects.create(country=country, name='Tehran queue')
+        city = City.objects.create(province=province, name='Tehran queue')
+        MarketLocation.objects.create(
+            market=self.market,
+            city=city,
+            address='Queue address',
+            zip_code='1234567890',
+            latitude='35.000000',
+            longitude='51.000000',
+        )
         queued = self.client.post(f'/api/v1/owner/market/queue/{self.market.id}/')
         self.assertEqual(queued.status_code, 200)
         self.market.refresh_from_db()
@@ -196,6 +244,36 @@ class MarketScheduleIntegrityTests(TestCase):
             start_time=overrides.get('start_time', time(9)),
             end_time=overrides.get('end_time', time(12)),
         )
+
+    def test_owner_can_atomically_replace_two_daily_intervals(self):
+        self.create_schedule()
+        self.client.force_authenticate(self.owner)
+        response = self.client.put(
+            '/api/v1/owner/market/schedules/replace/',
+            {
+                'market': str(self.market.id),
+                'schedules': [
+                    {
+                        'day': 1,
+                        'interval_index': 1,
+                        'start': '08:00',
+                        'end': '12:00',
+                    },
+                    {
+                        'day': 1,
+                        'interval_index': 2,
+                        'start': '14:00',
+                        'end': '18:00',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        schedules = MarketSchedule.objects.filter(market=self.market)
+        self.assertEqual(schedules.count(), 2)
+        self.assertEqual(schedules.first().start_time, time(8))
 
     def test_platform_admin_can_list_and_manage_any_market_schedule(self):
         admin = User.objects.create_superuser('09127770999', None)

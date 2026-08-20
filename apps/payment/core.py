@@ -109,7 +109,9 @@ class PaymentCore:
     def pay(self, user, data):
         target = data.get('resolved_target')
         requested_amount = data.get('resolved_amount')
-        if target is None or requested_amount is None or not isinstance(target, (Wallet, Order)):
+        if target is None or requested_amount is None or not isinstance(
+            target, (Wallet, Order, Market)
+        ):
             return False, 'Invalid payment target'
 
         merchant_id = getattr(settings, 'ZARINPAL_MERCHANT_ID', '') or os.environ.get(
@@ -194,6 +196,53 @@ class PaymentCore:
 
                 target.status = Order.PROCESSING
                 target.save(update_fields=['status', 'updated_at'])
+            elif isinstance(target, Market):
+                try:
+                    target = Market.objects.select_for_update().get(
+                        id=target.id,
+                        user=user,
+                        status__in=(
+                            Market.DRAFT,
+                            Market.NOT_PUBLISHED,
+                            Market.NEEDS_EDITING,
+                        ),
+                        is_paid=False,
+                    )
+                except Market.DoesNotExist:
+                    return False, 'Publishable store not found'
+                existing_payment = (
+                    Payment.objects.filter(
+                        user=user,
+                        target_content_type=target_content_type,
+                        target_id=target.id,
+                        status=Payment.PENDING,
+                    )
+                    .first()
+                )
+                if existing_payment is not None:
+                    existing_gateway = Zarinpal.objects.filter(
+                        payment=existing_payment,
+                    ).first()
+                    gateway_metadata = (
+                        existing_gateway.verification_data
+                        if existing_gateway is not None
+                        else None
+                    )
+                    if (
+                        existing_gateway
+                        and existing_gateway.authority
+                        and isinstance(gateway_metadata, dict)
+                        and gateway_metadata.get('integrity_version')
+                        == self.integrity_version
+                    ):
+                        return True, existing_gateway
+                    return False, 'Existing payment session requires reconciliation'
+                amount = Decimal(str(target.sub_category.market_fee))
+                is_valid, validation_error = validate_payment_amount(amount)
+                if not is_valid:
+                    return False, validation_error
+                if amount != Decimal(str(requested_amount)):
+                    return False, 'Store subscription fee changed; refresh before paying'
             else:
                 try:
                     target = Wallet.objects.select_for_update().get(id=target.id, user=user)
@@ -412,9 +461,17 @@ class PostPaymentCore:
                 id=payment.target_id,
                 user=self.user,
             )
-            if market.status == Market.DRAFT:
+            market.is_paid = True
+            if market.status in (
+                Market.DRAFT,
+                Market.NOT_PUBLISHED,
+                Market.NEEDS_EDITING,
+            ):
                 market.status = Market.QUEUE
-                market.save(update_fields=['status', 'updated_at'])
+            market.status_reason = ''
+            market.save(
+                update_fields=['status', 'status_reason', 'is_paid', 'updated_at']
+            )
             return
 
         raise ValueError('Unsupported payment target')

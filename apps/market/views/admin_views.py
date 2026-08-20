@@ -5,7 +5,6 @@ from rest_framework.response import Response
 from apps.core.permissions import IsPlatformAdmin
 from apps.market.models import Market, MarketRevision
 from apps.market.services import review_market_publication, review_market_revision
-from apps.payment.models import Payment
 
 
 class RevisionDecisionSerializer(serializers.Serializer):
@@ -14,12 +13,16 @@ class RevisionDecisionSerializer(serializers.Serializer):
 
 
 class PublicationDecisionSerializer(serializers.Serializer):
-    action = serializers.ChoiceField(choices=('approve', 'reject'))
-    payment_id = serializers.UUIDField(required=False)
+    action = serializers.ChoiceField(
+        choices=('approve', 'reject', 'request_changes')
+    )
+    reason = serializers.CharField(required=False, allow_blank=True, default='')
 
     def validate(self, attrs):
-        if attrs['action'] == 'approve' and not attrs.get('payment_id'):
-            raise serializers.ValidationError({'payment_id': 'Required for publication.'})
+        if attrs['action'] in ('reject', 'request_changes') and not attrs['reason'].strip():
+            raise serializers.ValidationError(
+                {'reason': 'A reason is required for rejection or requested changes.'}
+            )
         return attrs
 
 
@@ -73,22 +76,13 @@ class MarketPublicationAdminView(views.APIView):
         market = get_object_or_404(
             Market.objects.all(),
             pk=market_id,
-            status__in=(
-                Market.QUEUE, Market.NOT_PUBLISHED, Market.NEEDS_EDITING, Market.PUBLISHED,
-            ),
+            status=Market.QUEUE,
         )
-        payment = None
-        if decision.validated_data['action'] == 'approve':
-            payment = get_object_or_404(
-                Payment.objects.all(),
-                pk=decision.validated_data['payment_id'],
-                amount__isnull=False,
-            )
         market, commissions = review_market_publication(
             market=market,
             reviewer=request.user,
             action=decision.validated_data['action'],
-            payment=payment,
+            reason=decision.validated_data['reason'],
         )
         return Response({
             'market_id': str(market.id),

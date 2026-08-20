@@ -58,29 +58,46 @@ def review_market_revision(*, revision, reviewer, action, reason=''):
 
 
 @transaction.atomic
-def review_market_publication(*, market, reviewer, action, payment=None):
-    del reviewer  # reserved for the publication audit model introduced with the real baseline
+def review_market_publication(*, market, reviewer, action, reason=''):
+    # Reserved for the publication audit model introduced with the real baseline.
+    del reviewer
     market = Market.objects.select_for_update().get(pk=market.pk)
-    if action == 'reject':
-        if market.status == Market.PUBLISHED:
-            raise serializers.ValidationError({'action': 'A published store cannot be rejected.'})
-        market.status = Market.NEEDS_EDITING
-        market.save(update_fields=['status', 'updated_at'])
+    if market.status != Market.QUEUE:
+        raise serializers.ValidationError(
+            {'action': 'Only a queued store can be reviewed.'}
+        )
+    if action in ('reject', 'request_changes'):
+        market.status = (
+            Market.NOT_PUBLISHED if action == 'reject' else Market.NEEDS_EDITING
+        )
+        market.status_reason = reason.strip()
+        market.save(update_fields=['status', 'status_reason', 'updated_at'])
         return market, []
 
-    if payment is None:
-        raise serializers.ValidationError({'payment_id': 'Required for publication.'})
-    payment = Payment.objects.select_for_update().get(pk=payment.pk)
-    if payment.status != Payment.COMPLETE or payment.user_id != market.user_id:
-        raise serializers.ValidationError({'payment_id': 'Completed store payment required.'})
-    if payment.target_id != market.id or not payment.target_content_type:
-        raise serializers.ValidationError({'payment_id': 'Payment is not for this store.'})
-    if payment.target_content_type.model_class() is not Market:
-        raise serializers.ValidationError({'payment_id': 'Payment is not for this store.'})
+    payment = (
+        Payment.objects.select_for_update()
+        .filter(
+            status=Payment.COMPLETE,
+            user_id=market.user_id,
+            target_id=market.id,
+            amount__isnull=False,
+        )
+        .order_by('-created_at')
+        .first()
+    )
+    if (
+        payment is None
+        or not payment.target_content_type
+        or payment.target_content_type.model_class() is not Market
+    ):
+        raise serializers.ValidationError(
+            {'payment': 'Completed store subscription payment required.'}
+        )
 
     market.status = Market.PUBLISHED
     market.is_paid = True
-    market.save(update_fields=['status', 'is_paid', 'updated_at'])
+    market.status_reason = ''
+    market.save(update_fields=['status', 'status_reason', 'is_paid', 'updated_at'])
     from apps.referral.services import accrue_store_publication_commissions
 
     commissions = accrue_store_publication_commissions(market=market, payment=payment)

@@ -1,3 +1,5 @@
+import re
+
 from rest_framework import serializers
 from django.urls import reverse
 import jdatetime
@@ -12,6 +14,18 @@ from apps.market.models import (
 
 
 class MarketCreateSerializer(serializers.ModelSerializer):
+    def validate_business_id(self, value):
+        normalized = value.strip().lower()
+        if not re.fullmatch(r'[a-z](?:[a-z0-9-]{3,61}[a-z0-9])', normalized):
+            raise serializers.ValidationError(
+                'Business ID must be a 5-63 character lowercase subdomain label.'
+            )
+        if '--' in normalized:
+            raise serializers.ValidationError(
+                'Business ID cannot contain consecutive hyphens.'
+            )
+        return normalized
+
     class Meta:
         model = Market
         fields = [
@@ -118,6 +132,7 @@ class MarketListSerializer(serializers.ModelSerializer):
             'sub_category',
             'sub_category_title',
             'status',
+            'status_reason',
             'is_paid',
             'created_at',
             'inactive_url',

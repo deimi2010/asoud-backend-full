@@ -49,6 +49,41 @@ class MarketScheduleListQuerySerializer(serializers.Serializer):
     market = serializers.UUIDField(required=False)
 
 
+class MarketScheduleReplaceItemSerializer(serializers.Serializer):
+    day = serializers.IntegerField(min_value=1, max_value=7)
+    interval_index = serializers.IntegerField(min_value=1, max_value=2)
+    start = serializers.TimeField()
+    end = serializers.TimeField()
+
+    def validate(self, attrs):
+        if attrs['end'] <= attrs['start']:
+            raise serializers.ValidationError('End time must be after start time.')
+        return attrs
+
+
+class MarketScheduleReplaceSerializer(serializers.Serializer):
+    market = serializers.UUIDField()
+    schedules = MarketScheduleReplaceItemSerializer(many=True)
+
+    def validate_schedules(self, schedules):
+        slots = set()
+        by_day = {}
+        for item in schedules:
+            slot = (item['day'], item['interval_index'])
+            if slot in slots:
+                raise serializers.ValidationError('Duplicate day interval index.')
+            slots.add(slot)
+            by_day.setdefault(item['day'], []).append(item)
+        for intervals in by_day.values():
+            ordered = sorted(intervals, key=lambda item: item['start'])
+            for previous, current in zip(ordered, ordered[1:]):
+                if current['start'] < previous['end']:
+                    raise serializers.ValidationError(
+                        'Working intervals cannot overlap.'
+                    )
+        return schedules
+
+
 class MarketScheduleEnvelopeSerializer(serializers.Serializer):
     success = serializers.BooleanField()
     code = serializers.IntegerField()

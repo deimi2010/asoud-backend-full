@@ -694,8 +694,33 @@ class MarketQueueAPIView(views.APIView):
                 ),
                 status=status.HTTP_409_CONFLICT,
             )
+        if not market_obj.is_paid:
+            return Response(
+                ApiResponse(
+                    success=False,
+                    code=409,
+                    error={
+                        'code': 'subscription_payment_required',
+                        'detail': 'A completed subscription payment is required.',
+                    },
+                ),
+                status=status.HTTP_409_CONFLICT,
+            )
+        if not hasattr(market_obj, 'contact') or not hasattr(market_obj, 'location'):
+            return Response(
+                ApiResponse(
+                    success=False,
+                    code=409,
+                    error={
+                        'code': 'market_profile_incomplete',
+                        'detail': 'Store contact and location must be completed.',
+                    },
+                ),
+                status=status.HTTP_409_CONFLICT,
+            )
         market_obj.status = Market.QUEUE
-        market_obj.save(update_fields=['status', 'updated_at'])
+        market_obj.status_reason = ''
+        market_obj.save(update_fields=['status', 'status_reason', 'updated_at'])
 
         success_response = ApiResponse(
             success=True,

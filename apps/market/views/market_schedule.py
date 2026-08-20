@@ -12,6 +12,7 @@ from apps.market.serializers.schedule import (
     MarketScheduleListQuerySerializer,
     MarketScheduleSerializer,
     MarketScheduleUpdateSerializer,
+    MarketScheduleReplaceSerializer,
 )
 from utils.response import ApiResponse
 
@@ -122,6 +123,37 @@ class MarketScheduleListView(views.APIView):
             schedules = schedules.filter(market__user=request.user)
         if market_id := query.validated_data.get('market'):
             schedules = schedules.filter(market_id=market_id)
+        return Response(
+            ApiResponse(
+                success=True,
+                code=status.HTTP_200_OK,
+                data=MarketScheduleSerializer(schedules, many=True).data,
+            )
+        )
+
+
+class MarketScheduleReplaceView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @transaction.atomic
+    def put(self, request):
+        serializer = MarketScheduleReplaceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        markets = Market.objects.select_for_update()
+        if not request.user.is_staff:
+            markets = markets.filter(user=request.user)
+        market = get_object_or_404(markets, id=data['market'])
+        MarketSchedule.objects.filter(market=market).delete()
+        schedules = MarketSchedule.objects.bulk_create([
+            MarketSchedule(
+                market=market,
+                day_of_week=item['day'] - 1,
+                start_time=item['start'],
+                end_time=item['end'],
+            )
+            for item in data['schedules']
+        ])
         return Response(
             ApiResponse(
                 success=True,

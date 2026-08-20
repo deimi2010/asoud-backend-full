@@ -8,11 +8,12 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from apps.cart.models import Order, OrderItem
 from apps.cart.views.owner import OrderVerifyView
 from apps.category.models import Category, Group, SubCategory
-from apps.market.models import Market
+from apps.market.models import Market, MarketContact, MarketLocation
 from apps.payment.core import PaymentCore, PostPaymentCore
 from apps.payment.models import Payment, Zarinpal
 from apps.payment.serializers.user import PaymentCreateSerializer
 from apps.product.models import Product
+from apps.region.models import City, Country, Province
 from apps.users.models import User
 from apps.wallet.models import Wallet
 
@@ -95,6 +96,21 @@ class PaymentCreateSecurityTests(TestCase):
         market.sub_category.market_fee = Decimal('2500')
         market.sub_category.save(update_fields=['market_fee', 'updated_at'])
         market.save(update_fields=['status', 'updated_at'])
+        MarketContact.objects.create(
+            market=market,
+            first_mobile_number=self.user.mobile_number,
+        )
+        country = Country.objects.create(name='Iran payment')
+        province = Province.objects.create(country=country, name='Tehran payment')
+        city = City.objects.create(province=province, name='Tehran payment')
+        MarketLocation.objects.create(
+            market=market,
+            city=city,
+            address='Payment address',
+            zip_code='1234567890',
+            latitude='35.000000',
+            longitude='51.000000',
+        )
 
         wrong = self.serializer(
             target='market_subscription', target_id=str(market.id), amount='1'
@@ -106,8 +122,14 @@ class PaymentCreateSecurityTests(TestCase):
         self.assertFalse(wrong.is_valid())
         self.assertIn('amount', wrong.errors)
         self.assertTrue(correct.is_valid(), correct.errors)
+        without_client_amount = self.serializer(
+            target='market_subscription',
+            target_id=str(market.id),
+        )
+        without_client_amount.initial_data.pop('amount')
+        self.assertTrue(without_client_amount.is_valid(), without_client_amount.errors)
 
-    def test_completed_subscription_only_queues_store_for_admin_review(self):
+    def test_completed_subscription_marks_store_paid_and_queues_review(self):
         market = self.product.market
         market.status = Market.DRAFT
         market.is_paid = False
@@ -123,7 +145,7 @@ class PaymentCreateSecurityTests(TestCase):
 
         market.refresh_from_db()
         self.assertEqual(market.status, Market.QUEUE)
-        self.assertFalse(market.is_paid)
+        self.assertTrue(market.is_paid)
 
     def test_gateway_amount_cannot_exceed_transaction_column_capacity(self):
         serializer = self.serializer(amount='1000000000000000000')

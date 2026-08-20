@@ -23,7 +23,8 @@ from apps.market.views.market_schedule import (
     MarketScheduleAPIView,
     MarketScheduleListView,
     MarketScheduleUpdateView,
-    MarketScheduleDeleteView
+    MarketScheduleDeleteView,
+    MarketScheduleReplaceView,
 )
 from apps.market.views.membership import (
     MarketMembershipDetailView,
@@ -135,6 +136,11 @@ urlpatterns = [
         'schedules/list/',
         MarketScheduleListView.as_view(),
         name='schedule-list',
+    ),
+    path(
+        'schedules/replace/',
+        MarketScheduleReplaceView.as_view(),
+        name='schedule-replace',
     ),
     path(
         'schedules/<uuid:pk>/update/',

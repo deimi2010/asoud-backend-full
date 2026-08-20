@@ -62,6 +62,12 @@ class Market(BaseModel):
         verbose_name=_('Status'),
     )
 
+    status_reason = models.TextField(
+        blank=True,
+        default='',
+        verbose_name=_('Status reason'),
+    )
+
     is_paid = models.BooleanField(
         default=False,
         verbose_name=_('Is paid'),
@@ -80,7 +86,7 @@ class Market(BaseModel):
     )
 
     business_id = models.CharField(
-        max_length=20,
+        max_length=63,
         unique=True,
         verbose_name=_('Business id'),
     )
