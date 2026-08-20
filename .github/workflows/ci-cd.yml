@@ -3,8 +3,10 @@ name: Backend CI
 on:
   push:
     branches: [main, develop, staging]
+
   pull_request:
     branches: [main, develop]
+
   workflow_dispatch:
 
 permissions:
@@ -24,61 +26,96 @@ env:
   DATABASE_PASSWORD: postgres
   REDIS_URL: redis://127.0.0.1:6379/15
 
+
 jobs:
   quality:
     name: System, lint, and OpenAPI checks
     runs-on: ubuntu-latest
+
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      DJANGO_SECRET_KEY: ci-placeholder-value-with-at-least-thirty-two-characters
+      ASOUD_RATE_LIMIT_KEY_SECRET: ci-placeholder-rate-value-with-at-least-thirty-two-characters
+      DATABASE_NAME: ci
+      DATABASE_USERNAME: ci
+      DATABASE_PASSWORD: ci-placeholder
+      DATABASE_HOST: localhost
+      REDIS_URL: redis://localhost:6379/0
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ci
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci-placeholder
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+
       - run: python -m pip install --upgrade pip
+
       - run: pip install -r requirements-dev.txt
+
       - name: Reject syntax and undefined-name regressions
         run: >-
           ruff check apps config tests manage.py
           --select E9,F63,F7,F82
           --exclude migrations,apps/analytics,apps/core/management
+
       - run: python manage.py check
+
       - name: Validate production security settings
         env:
-          DJANGO_SETTINGS_MODULE: config.settings.production
-          DJANGO_SECRET_KEY: ci-placeholder-value-with-at-least-thirty-two-characters
-          ASOUD_RATE_LIMIT_KEY_SECRET: ci-placeholder-rate-value-with-at-least-thirty-two-characters
-          DATABASE_NAME: ci
-          DATABASE_USERNAME: ci
-          DATABASE_PASSWORD: ci-placeholder
-          DATABASE_HOST: db.invalid
-          REDIS_URL: rediss://redis.invalid:6380/0
           DJANGO_ALLOWED_HOSTS: asoud.example
           CSRF_TRUSTED_ORIGINS: https://asoud.example
           CORS_ALLOWED_ORIGINS: https://asoud.example
         run: python manage.py check --deploy --tag security
+
       - name: Generate and validate OpenAPI without a populated database
         run: python scripts/check_openapi.py --output schema-ci.yml
+
       - uses: actions/upload-artifact@v4
         with:
           name: openapi-schema
           path: schema-ci.yml
 
+
   security:
     name: Dependency vulnerability gate
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+
       - run: python -m pip install --upgrade pip pip-audit
+
       - run: pip-audit --requirement requirements.txt --progress-spinner off
+
       - run: pip-audit --requirement requirements-ml.txt --progress-spinner off
+
 
   test:
     name: Regression tests on PostgreSQL and Redis
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:15-alpine
@@ -86,28 +123,36 @@ jobs:
           POSTGRES_DB: test_asoud
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-        ports: ["5432:5432"]
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d test_asoud"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+
       redis:
         image: redis:7-alpine
-        ports: ["6379:6379"]
+        ports:
+          - 6379:6379
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+
       - run: python -m pip install --upgrade pip
+
       - run: pip install -r requirements-dev.txt
+
       - run: pip install -r requirements-ml.txt
       - name: Run the production-critical regression suite
         run: >-
@@ -137,58 +182,92 @@ jobs:
           apps.analytics.test_ml_training
           apps.product.tests
           --verbosity 2
+
       - run: coverage report --show-missing
+
       - run: coverage xml
+
       - uses: actions/upload-artifact@v4
         with:
           name: coverage
           path: coverage.xml
 
+
   migration-drift:
     name: Migration history gate
     runs-on: ubuntu-latest
+
     env:
       DJANGO_SETTINGS_MODULE: config.settings.migration_dev
+      DATABASE_NAME: ci
+      DATABASE_USERNAME: ci
+      DATABASE_PASSWORD: ci-placeholder
+      DATABASE_HOST: localhost
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ci
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci-placeholder
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+
       - run: python -m pip install --upgrade pip
+
       - run: pip install -r requirements.txt
+
       - name: Reject model changes without migration history
         run: python manage.py makemigrations --check --dry-run
-
   containers:
     name: Build and production topology gates
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Reject broad or sensitive Docker build inputs
         run: |
           ! grep -Eq '^[[:space:]]*COPY[[:space:]]+\.[[:space:]]' Dockerfile
           ! grep -Eq '^[[:space:]]*ADD[[:space:]]+\.' Dockerfile
+
       - name: Build core and ML runtime images
         run: |
           docker build --target runtime --tag asoud-backend-ci:core .
           docker build --target runtime-ml --tag asoud-backend-ci:ml .
+
       - name: Reject critical/high CVEs in the core runtime image
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2
         with:
           config: .grype.yaml
           image: asoud-backend-ci:core
           fail-build: true
           severity-cutoff: high
           output-format: table
+
       - name: Reject critical/high CVEs in the ML runtime image
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2
         with:
           config: .grype.yaml
           image: asoud-backend-ci:ml
           fail-build: true
           severity-cutoff: high
           output-format: table
+
       - name: Validate canonical production Compose
         env:
           BACKEND_IMAGE: example.invalid/asoud/backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -208,13 +287,18 @@ jobs:
           ZARINPAL_MERCHANT_ID_FILE: .ci-secrets/placeholder
           TLS_FULLCHAIN_FILE: .ci-secrets/tls.crt
           TLS_PRIVATE_KEY_FILE: .ci-secrets/tls.key
+
         run: |
           mkdir -p .ci-secrets
           touch .ci-secrets/placeholder
+
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
             -subj '/CN=localhost' \
-            -keyout .ci-secrets/tls.key -out .ci-secrets/tls.crt >/dev/null 2>&1
+            -keyout .ci-secrets/tls.key \
+            -out .ci-secrets/tls.crt >/dev/null 2>&1
+
           docker compose -f docker-compose.production.yml config --quiet
+
           docker run --rm \
             --add-host backend:127.0.0.1 \
             --add-host frontend:127.0.0.1 \
@@ -225,4 +309,4 @@ jobs:
 
 # Image publication and automated deployment remain intentionally absent until
 # tracked secrets/build context, migration history, and the live runtime have
-# been reconciled and tested.
+# been reconciled and tested.÷÷
