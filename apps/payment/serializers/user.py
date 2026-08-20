@@ -211,7 +211,7 @@ class PaymentCreateSerializer(serializers.Serializer):
             resolved_amount = Decimal(str(target.sub_category.market_fee))
             if resolved_amount <= 0:
                 raise serializers.ValidationError({'amount': 'Store subscription fee is not configured.'})
-            if attrs['amount'] != resolved_amount:
+            if attrs.get('amount') is not None and attrs['amount'] != resolved_amount:
                 raise serializers.ValidationError({'amount': 'Amount does not match the subscription fee.'})
 
         attrs['resolved_target'] = target

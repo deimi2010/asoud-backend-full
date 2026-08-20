@@ -8,15 +8,23 @@ from apps.market.services import review_market_publication, review_market_revisi
 
 
 class RevisionDecisionSerializer(serializers.Serializer):
-    action = serializers.ChoiceField(choices=('approve', 'reject'))
+    action = serializers.CharField()
     reason = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate_action(self, value):
+        if value not in ('approve', 'reject'):
+            raise serializers.ValidationError('Unsupported revision action.')
+        return value
 
 
 class PublicationDecisionSerializer(serializers.Serializer):
-    action = serializers.ChoiceField(
-        choices=('approve', 'reject', 'request_changes')
-    )
+    action = serializers.CharField()
     reason = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate_action(self, value):
+        if value not in ('approve', 'reject', 'request_changes'):
+            raise serializers.ValidationError('Unsupported publication action.')
+        return value
 
     def validate(self, attrs):
         if attrs['action'] in ('reject', 'request_changes') and not attrs['reason'].strip():
