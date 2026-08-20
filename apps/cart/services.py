@@ -171,6 +171,8 @@ def _discount_applies(discount, items, market_id):
 
 
 def _validate_discount(discount, order, items, market_id, include_reservations=True):
+    if not discount.is_active:
+        raise CartIntegrityError('discount_inactive', 'Discount code is inactive.')
     if discount.expiry and discount.expiry < timezone.now():
         raise CartIntegrityError('discount_expired', 'Discount code has expired.')
     used = discount.consumed + (discount.reserved if include_reservations else 0)

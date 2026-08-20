@@ -45,6 +45,15 @@ class DiscountValidateView(views.APIView):
                     ),
                     status=status.HTTP_404_NOT_FOUND
                 )
+            if not discount.is_active:
+                return Response(
+                    ApiResponse(
+                        success=False,
+                        code=400,
+                        error=DISCOUNT_NOT_VALID,
+                    ),
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             if (
                 discount.limitation
                 and discount.consumed + discount.reserved >= discount.limitation

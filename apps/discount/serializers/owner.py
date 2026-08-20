@@ -17,12 +17,21 @@ class DiscountCreateSerializer(serializers.ModelSerializer):
     expiry = serializers.DateTimeField(required=False)
     limitation = serializers.IntegerField(required=False)
     position = serializers.CharField(required=False)
+    client_request_id = serializers.CharField(
+        required=False,
+        allow_blank=False,
+        max_length=64,
+        write_only=True,
+    )
 
     class Meta:
         model = Discount
         fields = [
             'id', 
             'code', 
+            'title',
+            'description',
+            'client_request_id',
             'content_type',
             'object_id',
             'percentage',
@@ -71,10 +80,54 @@ class DiscountCreateSerializer(serializers.ModelSerializer):
         return list(dict.fromkeys(value))
     
 class DiscountListSerializer(serializers.ModelSerializer):
+    status = serializers.SerializerMethodField()
+    remaining = serializers.SerializerMethodField()
+    store_name = serializers.SerializerMethodField()
+    store_business_id = serializers.SerializerMethodField()
+
     class Meta:
         model = Discount
-        fields = ['id', 'code', 'percentage', 'expiry']
+        fields = [
+            'id',
+            'title',
+            'description',
+            'code',
+            'percentage',
+            'limitation',
+            'consumed',
+            'reserved',
+            'remaining',
+            'expiry',
+            'is_active',
+            'status',
+            'store_name',
+            'store_business_id',
+            'created_at',
+        ]
+
+    def get_status(self, obj):
+        if not obj.is_active:
+            return 'inactive'
+        if obj.expiry and obj.expiry < timezone.now():
+            return 'expired'
+        if obj.limitation and obj.consumed + obj.reserved >= obj.limitation:
+            return 'full'
+        return 'active'
+
+    def get_remaining(self, obj):
+        if obj.limitation == 0:
+            return None
+        return max(obj.limitation - obj.consumed - obj.reserved, 0)
+
+    def _market(self, obj):
+        target = obj.content_object
+        return target if obj.content_type.model == 'market' else target.market
+
+    def get_store_name(self, obj):
+        return self._market(obj).name
+
+    def get_store_business_id(self, obj):
+        return self._market(obj).business_id
 
 class DiscountDetailSerializer(DiscountCreateSerializer):
     pass
-

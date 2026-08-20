@@ -26,6 +26,22 @@ class DiscountCreateView(views.APIView):
 
         serializer = DiscountCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        client_request_id = serializer.validated_data.get('client_request_id')
+        if client_request_id:
+            existing = Discount.objects.filter(
+                owner=request.user,
+                client_request_id=client_request_id,
+            ).first()
+            if existing is not None:
+                return Response(
+                    ApiResponse(
+                        success=True,
+                        code=200,
+                        data=DiscountListSerializer(existing).data,
+                    ),
+                    status=status.HTTP_200_OK,
+                )
         
         # Get market or product object
         content_type = serializer.validated_data['content_type']
@@ -91,7 +107,7 @@ class DiscountCreateView(views.APIView):
             ApiResponse(
                 success=True,
                 code=201,
-                data=DiscountDetailSerializer(discount).data
+                data=DiscountListSerializer(discount).data
             ),
             status=status.HTTP_201_CREATED
         )
@@ -144,6 +160,57 @@ class DiscountDetailView(views.APIView):
             status=status.HTTP_200_OK
         )
 
+    def patch(self, request, pk):
+        try:
+            discount = Discount.objects.get(id=pk)
+        except Discount.DoesNotExist:
+            return Response(
+                ApiResponse(
+                    success=False,
+                    code=404,
+                    error={
+                        'code': 'discount_not_found',
+                        'detail': 'Discount not found',
+                    },
+                ),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not request.user.is_staff and discount.owner_id != request.user.id:
+            return Response(
+                ApiResponse(
+                    success=False,
+                    code=403,
+                    error={
+                        'code': 'permission_denied',
+                        'detail': 'You do not have permission to update this discount',
+                    },
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        is_active = request.data.get('is_active')
+        if not isinstance(is_active, bool):
+            return Response(
+                ApiResponse(
+                    success=False,
+                    code=400,
+                    error={
+                        'code': 'invalid_status',
+                        'detail': 'is_active must be a boolean.',
+                    },
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        discount.is_active = is_active
+        discount.save(update_fields=['is_active', 'updated_at'])
+        return Response(
+            ApiResponse(
+                success=True,
+                code=200,
+                data=DiscountListSerializer(discount).data,
+            ),
+            status=status.HTTP_200_OK,
+        )
+
 class DiscountListView(views.APIView):
     serializer_class = DiscountListSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -154,6 +221,39 @@ class DiscountListView(views.APIView):
         both product and market discounts are returned
         """
         discounts = Discount.objects.all() if request.user.is_staff else Discount.objects.filter(owner=request.user)
+        market_id = request.query_params.get('market_id')
+        if market_id:
+            try:
+                market = Market.objects.get(id=market_id)
+            except (Market.DoesNotExist, ValueError):
+                return Response(
+                    ApiResponse(
+                        success=False,
+                        code=404,
+                        error={
+                            'code': 'market_not_found',
+                            'detail': 'Market not found',
+                        },
+                    ),
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if not request.user.is_staff and market.user_id != request.user.id:
+                return Response(
+                    ApiResponse(
+                        success=False,
+                        code=403,
+                        error={
+                            'code': 'permission_denied',
+                            'detail': 'You do not have permission to view this market discounts',
+                        },
+                    ),
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            discounts = discounts.filter(
+                content_type__model='market',
+                object_id=market.id,
+            )
+        discounts = discounts.order_by('-created_at')
         
         serializer = DiscountListSerializer(discounts, many=True)
 

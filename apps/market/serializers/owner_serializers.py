@@ -10,6 +10,7 @@ from apps.market.models import (
     MarketContact,
     MarketSlider,
     MarketTheme,
+    MarketGatewayConnection,
 )
 
 
@@ -58,10 +59,21 @@ class MarketLocationCreateSerializer(serializers.ModelSerializer):
 
 
 class MarketLocationUpdateSerializer(serializers.ModelSerializer):
+    city_name = serializers.CharField(source='city.name', read_only=True)
+    province = serializers.UUIDField(source='city.province_id', read_only=True)
+    province_name = serializers.CharField(source='city.province.name', read_only=True)
+    country = serializers.UUIDField(source='city.province.country_id', read_only=True)
+    country_name = serializers.CharField(source='city.province.country.name', read_only=True)
+
     class Meta:
         model = MarketLocation
         fields = [
             'city',
+            'city_name',
+            'province',
+            'province_name',
+            'country',
+            'country_name',
             'address',
             'zip_code',
             'latitude',
@@ -112,6 +124,47 @@ class MarketThemeCreateSerializer(serializers.ModelSerializer):
             'font_color',
             'secondary_font_color',
         ]
+
+
+class MarketGatewayConnectionSerializer(serializers.ModelSerializer):
+    user_code = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        max_length=255,
+    )
+    has_user_code = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MarketGatewayConnection
+        fields = [
+            'gateway_type',
+            'user_code',
+            'has_user_code',
+            'status',
+        ]
+        read_only_fields = ['status', 'has_user_code']
+
+    def validate(self, attrs):
+        gateway_type = attrs.get(
+            'gateway_type',
+            getattr(self.instance, 'gateway_type', None),
+        )
+        user_code = attrs.get(
+            'user_code',
+            getattr(self.instance, 'user_code', ''),
+        ).strip()
+        if gateway_type == MarketGatewayConnection.PERSONAL and not user_code:
+            raise serializers.ValidationError({
+                'user_code': 'Personal gateway user code is required.'
+            })
+        attrs['user_code'] = (
+            user_code if gateway_type == MarketGatewayConnection.PERSONAL else ''
+        )
+        return attrs
+
+    def get_has_user_code(self, obj):
+        return bool(obj.user_code)
 
 
 class MarketListSerializer(serializers.ModelSerializer):

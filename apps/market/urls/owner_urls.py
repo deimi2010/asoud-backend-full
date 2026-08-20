@@ -18,6 +18,7 @@ from apps.market.views.owner_views import (
     MarketBackgroundAPIView,
     MarketSliderAPIView,
     MarketThemeAPIView,
+    MarketGatewayConnectionAPIView,
 )
 
 from apps.market.views.market_schedule import (
@@ -130,6 +131,11 @@ urlpatterns = [
         'theme/<str:pk>/',
         MarketThemeAPIView.as_view(),
         name='theme',
+    ),
+    path(
+        'gateway/<uuid:pk>/',
+        MarketGatewayConnectionAPIView.as_view(),
+        name='gateway-connection',
     ),
 
     # schedule

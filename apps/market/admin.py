@@ -13,6 +13,7 @@ from .models import (
     MarketDiscount,
     MarketSchedule,
     MarketRevision,
+    MarketGatewayConnection,
 )
 
 # Register your models here.
@@ -63,6 +64,16 @@ class MarketThemeTabularInline(BaseTabularInline):
     )
 
 
+class MarketGatewayConnectionTabularInline(BaseTabularInline):
+    model = MarketGatewayConnection
+    extra = 0
+    fields = (
+        'gateway_type',
+        'status',
+        'user_code',
+    )
+
+
 class MarketScheduleTabularInline(BaseTabularInline):
     model = MarketSchedule
     extra = 1
@@ -80,6 +91,7 @@ class MarketAdmin(BaseAdmin):
         MarketContactTabularInline,
         MarketSliderTabularInline,
         MarketThemeTabularInline,
+        MarketGatewayConnectionTabularInline,
         MarketScheduleTabularInline,
     ]
 

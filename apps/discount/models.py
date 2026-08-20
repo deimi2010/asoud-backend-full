@@ -42,6 +42,27 @@ class Discount(BaseModel):
         on_delete=models.CASCADE    
     )
 
+    title = models.CharField(
+        max_length=120,
+        blank=True,
+        default='',
+        verbose_name=_('Title'),
+    )
+
+    description = models.TextField(
+        blank=True,
+        default='',
+        verbose_name=_('Description'),
+    )
+
+    client_request_id = models.CharField(
+        max_length=64,
+        blank=True,
+        null=True,
+        unique=True,
+        verbose_name=_('Client request ID'),
+    )
+
     users = models.JSONField(
         verbose_name=_('Users'),
         blank=True, 
@@ -87,6 +108,11 @@ class Discount(BaseModel):
         verbose_name=_('Reserved uses'),
         default=0,
     )
+
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name=_('Is active'),
+    )
     
     class Meta:
         db_table = 'discount'
@@ -109,7 +135,7 @@ class Discount(BaseModel):
         # Check if the discount is not expired
         not_expired = self.expiry is None or self.expiry >= timezone.now()
 
-        return within_limit and not_expired
+        return self.is_active and within_limit and not_expired
 
     is_valid.boolean = True  # Display as a boolean icon in the admin
     is_valid.short_description = _("Is Valid")

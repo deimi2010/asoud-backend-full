@@ -9,7 +9,7 @@ from rest_framework.test import APIClient
 from apps.category.models import Category, Group, SubCategory
 from apps.market.models import (
     Market, MarketBookmark, MarketContact, MarketLocation, MarketMembership, MarketRevision,
-    MarketSchedule, MarketTheme,
+    MarketSchedule, MarketTheme, MarketGatewayConnection,
 )
 from apps.market.serializers.owner_serializers import MarketCreateSerializer
 from apps.region.models import City, Country, Province
@@ -179,6 +179,19 @@ class MarketRevisionWorkflowTests(TestCase):
             format='json',
         )
         self.assertEqual(drafted.status_code, 202)
+        self.assertTrue(drafted.data['success'])
+        self.assertEqual(drafted.data['code'], 202)
+        self.assertEqual(drafted.data['data']['revision_status'], 'pending')
+
+        location_details = self.client.get(
+            f'/api/v1/owner/market/location/{self.market.id}/'
+        )
+        self.assertEqual(location_details.status_code, 200)
+        self.assertEqual(location_details.data['data']['city_name'], city.name)
+        self.assertEqual(
+            location_details.data['data']['province_name'], province.name
+        )
+        self.assertEqual(location_details.data['data']['country_name'], country.name)
         location.refresh_from_db()
         self.assertEqual(location.address, 'Published address')
 
@@ -202,6 +215,9 @@ class MarketRevisionWorkflowTests(TestCase):
             format='json',
         )
         self.assertEqual(drafted.status_code, 202)
+        self.assertTrue(drafted.data['success'])
+        self.assertEqual(drafted.data['code'], 202)
+        self.assertEqual(drafted.data['data']['theme']['color'], '#222222')
         theme.refresh_from_db()
         self.assertEqual(theme.color, '#111111')
 
@@ -215,6 +231,42 @@ class MarketRevisionWorkflowTests(TestCase):
         self.assertEqual(approved.status_code, 200)
         theme.refresh_from_db()
         self.assertEqual(theme.color, '#222222')
+
+    def test_owner_can_submit_asoud_gateway_connection_request(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            f'/api/v1/owner/market/gateway/{self.market.id}/',
+            {'gateway_type': 'asoud'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(response.data['success'])
+        connection = MarketGatewayConnection.objects.get(market=self.market)
+        self.assertEqual(connection.gateway_type, MarketGatewayConnection.ASOUD)
+        self.assertEqual(connection.status, MarketGatewayConnection.PENDING)
+        self.assertEqual(connection.user_code, '')
+
+    def test_personal_gateway_requires_code_and_does_not_echo_it(self):
+        self.client.force_authenticate(self.owner)
+        url = f'/api/v1/owner/market/gateway/{self.market.id}/'
+        invalid = self.client.post(
+            url,
+            {'gateway_type': 'personal', 'user_code': ''},
+            format='json',
+        )
+        valid = self.client.post(
+            url,
+            {'gateway_type': 'personal', 'user_code': 'merchant-user-123'},
+            format='json',
+        )
+
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(valid.status_code, 202)
+        self.assertNotIn('user_code', valid.data['data'])
+        self.assertTrue(valid.data['data']['has_user_code'])
+        connection = MarketGatewayConnection.objects.get(market=self.market)
+        self.assertEqual(connection.user_code, 'merchant-user-123')
 
 
 class MarketScheduleIntegrityTests(TestCase):
@@ -361,6 +413,7 @@ class MarketScheduleIntegrityTests(TestCase):
                 'id': str(schedule.id),
                 'market': str(self.market.id),
                 'day': '1',
+                'interval_index': 1,
                 'start': '09:00:00',
                 'end': '12:00:00',
             },
@@ -440,6 +493,7 @@ class MarketScheduleIntegrityTests(TestCase):
         )
 
         self.assertEqual([item['id'] for item in listing.data['data']], [str(schedule.id)])
+        self.assertEqual(listing.data['data'][0]['interval_index'], 1)
         self.assertEqual(malformed_filter.status_code, 400)
         self.assertEqual(foreign_update.status_code, 404)
         self.assertEqual(updated.status_code, 200)

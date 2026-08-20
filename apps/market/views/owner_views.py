@@ -11,6 +11,7 @@ from apps.market.models import (
     MarketSlider,
     MarketTheme,
     MarketRevision,
+    MarketGatewayConnection,
 )
 from apps.market.revisions import json_payload, save_pending_section
 
@@ -24,6 +25,7 @@ from apps.market.serializers.owner_serializers import (
     MarketListSerializer,
     MarketSliderListSerializer,
     MarketThemeCreateSerializer,
+    MarketGatewayConnectionSerializer,
 )
 
 
@@ -72,6 +74,89 @@ class MarketCreateAPIView(views.APIView):
             )
 
             return Response(success_response, status=status.HTTP_201_CREATED)
+
+
+class MarketGatewayConnectionAPIView(views.APIView):
+    serializer_class = MarketGatewayConnectionSerializer
+    permission_classes = [IsStoreOwner]
+
+    def _get_market(self, request, pk):
+        try:
+            return _manageable_markets(request.user).get(id=pk)
+        except Market.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        market = self._get_market(request, pk)
+        if market is None:
+            return Response(
+                ApiResponse(
+                    success=False,
+                    code=404,
+                    error={
+                        'code': 'market_not_found',
+                        'detail': 'Market not found',
+                    },
+                ),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            connection = market.gateway_connection
+        except MarketGatewayConnection.DoesNotExist:
+            return Response(
+                ApiResponse(
+                    success=True,
+                    code=200,
+                    data=None,
+                    message='No gateway connection has been requested.',
+                ),
+                status=status.HTTP_200_OK,
+            )
+        return Response(
+            ApiResponse(
+                success=True,
+                code=200,
+                data=MarketGatewayConnectionSerializer(connection).data,
+                message='Gateway connection retrieved successfully.',
+            ),
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request, pk):
+        market = self._get_market(request, pk)
+        if market is None:
+            return Response(
+                ApiResponse(
+                    success=False,
+                    code=404,
+                    error={
+                        'code': 'market_not_found',
+                        'detail': 'Market not found',
+                    },
+                ),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        connection = MarketGatewayConnection.objects.filter(market=market).first()
+        serializer = MarketGatewayConnectionSerializer(
+            connection,
+            data=request.data,
+            context={'request': request},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save(
+            market=market,
+            status=MarketGatewayConnection.PENDING,
+        )
+        return Response(
+            ApiResponse(
+                success=True,
+                code=202,
+                data=serializer.data,
+                message='Gateway connection submitted for review.',
+            ),
+            status=status.HTTP_202_ACCEPTED,
+        )
 
 
 class MarketUpdateAPIView(views.APIView):
@@ -357,7 +442,15 @@ class MarketLocationUpdateAPIView(views.APIView):
                     data=serializer.validated_data,
                 )
                 return Response(
-                    {'revision_id': str(revision.id), 'status': revision.status},
+                    ApiResponse(
+                        success=True,
+                        code=202,
+                        data={
+                            'revision_id': str(revision.id),
+                            'revision_status': revision.status,
+                        },
+                        message='Location changes saved and sent for approval.',
+                    ),
                     status=status.HTTP_202_ACCEPTED,
                 )
             serializer.save()
@@ -538,7 +631,15 @@ class MarketContactUpdateAPIView(views.APIView):
                     data=serializer.validated_data,
                 )
                 return Response(
-                    {'revision_id': str(revision.id), 'status': revision.status},
+                    ApiResponse(
+                        success=True,
+                        code=202,
+                        data={
+                            'revision_id': str(revision.id),
+                            'revision_status': revision.status,
+                        },
+                        message='Contact changes saved and sent for approval.',
+                    ),
                     status=status.HTTP_202_ACCEPTED,
                 )
             serializer.save()
@@ -1206,7 +1307,16 @@ class MarketThemeAPIView(views.APIView):
                     data=serializer.validated_data,
                 )
                 return Response(
-                    {'revision_id': str(revision.id), 'status': revision.status},
+                    ApiResponse(
+                        success=True,
+                        code=202,
+                        data={
+                            'revision_id': str(revision.id),
+                            'status': revision.status,
+                            'theme': serializer.validated_data,
+                        },
+                        message='Market theme submitted for approval.',
+                    ),
                     status=status.HTTP_202_ACCEPTED,
                 )
             serializer.save(market=market)

@@ -89,6 +89,92 @@ class DiscountOwnerIntegrityTests(TestCase):
         self.assertNotIn('CLIENT-CODE', codes)
         self.assertTrue(all(len(code) == 10 and code.isalnum() for code in codes))
 
+    def test_retry_with_same_client_request_id_is_idempotent(self):
+        payload = self.create_payload(
+            title='Summer sale',
+            description='Market-wide discount',
+            client_request_id='local-request-1',
+        )
+        first = self.client.post(
+            '/api/v1/discount/owner/create/',
+            payload,
+            format='json',
+        )
+        second = self.client.post(
+            '/api/v1/discount/owner/create/',
+            payload,
+            format='json',
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.data['data']['code'], second.data['data']['code'])
+        self.assertEqual(Discount.objects.count(), 1)
+
+    def test_market_list_is_filtered_and_contains_display_fields(self):
+        other_market = Market.objects.create(
+            user=self.owner,
+            type=Market.SHOP,
+            status=Market.PUBLISHED,
+            business_id='DISCOUNT-2',
+            name='Other market',
+            sub_category=self.market.sub_category,
+        )
+        Discount.objects.create(
+            content_object=self.market,
+            owner=self.owner,
+            title='Visible',
+            description='Visible description',
+            code='VISIBLE001',
+            percentage=20,
+            limitation=5,
+        )
+        Discount.objects.create(
+            content_object=other_market,
+            owner=self.owner,
+            code='HIDDEN0001',
+            percentage=10,
+        )
+
+        response = self.client.get(
+            f'/api/v1/discount/owner/list/?market_id={self.market.id}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['data']), 1)
+        item = response.data['data'][0]
+        self.assertEqual(item['title'], 'Visible')
+        self.assertEqual(item['remaining'], 5)
+        self.assertEqual(item['status'], 'active')
+        self.assertEqual(item['store_business_id'], self.market.business_id)
+
+    def test_owner_can_deactivate_discount_and_it_cannot_validate(self):
+        discount = Discount.objects.create(
+            content_object=self.market,
+            owner=self.owner,
+            code='DISABLED01',
+            percentage=10,
+        )
+        updated = self.client.patch(
+            f'/api/v1/discount/owner/{discount.id}/',
+            {'is_active': False},
+            format='json',
+        )
+        self.client.force_authenticate(self.buyer)
+        validated = self.client.post(
+            '/api/v1/discount/user/validate/',
+            {
+                'code': discount.code,
+                'content_type': 'market',
+                'object_id': str(self.market.id),
+            },
+            format='json',
+        )
+
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.data['data']['status'], 'inactive')
+        self.assertEqual(validated.status_code, 400)
+
     def test_discount_referenced_by_order_cannot_be_deleted(self):
         discount = Discount.objects.create(
             content_object=self.market,

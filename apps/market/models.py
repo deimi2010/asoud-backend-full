@@ -396,6 +396,56 @@ class MarketTheme(BaseModel):
         return f"{self.market}-{self.font}"
 
 
+class MarketGatewayConnection(BaseModel):
+    ASOUD = 'asoud'
+    PERSONAL = 'personal'
+    GATEWAY_TYPE_CHOICES = (
+        (ASOUD, _('Asoud gateway')),
+        (PERSONAL, _('Personal gateway')),
+    )
+
+    PENDING = 'pending'
+    ACTIVE = 'active'
+    REJECTED = 'rejected'
+    STATUS_CHOICES = (
+        (PENDING, _('Pending review')),
+        (ACTIVE, _('Active')),
+        (REJECTED, _('Rejected')),
+    )
+
+    market = models.OneToOneField(
+        Market,
+        related_name='gateway_connection',
+        on_delete=models.CASCADE,
+        verbose_name=_('Market'),
+    )
+    gateway_type = models.CharField(
+        max_length=20,
+        choices=GATEWAY_TYPE_CHOICES,
+        verbose_name=_('Gateway type'),
+    )
+    user_code = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        verbose_name=_('Personal gateway user code'),
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=PENDING,
+        verbose_name=_('Connection status'),
+    )
+
+    class Meta:
+        db_table = 'market_gateway_connection'
+        verbose_name = _('Market gateway connection')
+        verbose_name_plural = _('Market gateway connections')
+
+    def __str__(self):
+        return f'{self.market}-{self.gateway_type}-{self.status}'
+
+
 class MarketReport(BaseModel):
     DRAFT = "draft"
     IN_PROGRESS = "in_progress"

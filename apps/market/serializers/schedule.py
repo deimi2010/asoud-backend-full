@@ -8,15 +8,24 @@ class MarketScheduleSerializer(serializers.ModelSerializer):
     day = serializers.SerializerMethodField()
     start = serializers.TimeField(source='start_time', read_only=True)
     end = serializers.TimeField(source='end_time', read_only=True)
+    interval_index = serializers.SerializerMethodField()
 
     class Meta:
         model = MarketSchedule
-        fields = ['id', 'market', 'day', 'start', 'end']
+        fields = ['id', 'market', 'day', 'interval_index', 'start', 'end']
         read_only_fields = fields
 
     def get_day(self, obj) -> str:
         # Flutter's established contract numbers Saturday through Friday as 1..7.
         return str(obj.day_of_week + 1)
+
+    def get_interval_index(self, obj) -> int:
+        earlier_intervals = MarketSchedule.objects.filter(
+            market_id=obj.market_id,
+            day_of_week=obj.day_of_week,
+            start_time__lt=obj.start_time,
+        ).count()
+        return earlier_intervals + 1
 
 
 class MarketScheduleInputSerializer(serializers.Serializer):
