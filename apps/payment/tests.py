@@ -129,7 +129,7 @@ class PaymentCreateSecurityTests(TestCase):
         without_client_amount.initial_data.pop('amount')
         self.assertTrue(without_client_amount.is_valid(), without_client_amount.errors)
 
-    def test_completed_subscription_marks_store_paid_and_queues_review(self):
+    def test_completed_subscription_marks_store_paid_without_requesting_publication(self):
         market = self.product.market
         market.status = Market.DRAFT
         market.is_paid = False
@@ -144,7 +144,7 @@ class PaymentCreateSecurityTests(TestCase):
         PostPaymentCore(self.user).payment_process(payment)
 
         market.refresh_from_db()
-        self.assertEqual(market.status, Market.QUEUE)
+        self.assertEqual(market.status, Market.DRAFT)
         self.assertTrue(market.is_paid)
 
     def test_gateway_amount_cannot_exceed_transaction_column_capacity(self):

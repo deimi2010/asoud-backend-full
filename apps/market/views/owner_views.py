@@ -126,6 +126,9 @@ class MarketUpdateAPIView(views.APIView):
                         'rejection_reason': '',
                     },
                 )
+                market.status = Market.QUEUE
+                market.status_reason = ''
+                market.save(update_fields=['status', 'status_reason', 'updated_at'])
                 return Response(
                     ApiResponse(
                         success=True,
@@ -730,6 +733,42 @@ class MarketQueueAPIView(views.APIView):
         )
 
         return Response(success_response, status=status.HTTP_200_OK)
+
+
+class MarketUnpublishAPIView(views.APIView):
+    permission_classes = [IsStoreOwner]
+
+    def post(self, request, pk, format=None):
+        try:
+            market = _manageable_markets(request.user).get(id=pk)
+        except Market.DoesNotExist:
+            return Response(
+                ApiResponse(
+                    success=False,
+                    code=404,
+                    error={'code': 'market_not_found', 'detail': 'Market not found.'},
+                ),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if market.status != Market.PUBLISHED:
+            return Response(
+                ApiResponse(
+                    success=False,
+                    code=409,
+                    error={
+                        'code': 'invalid_market_transition',
+                        'detail': 'Only a published store can be unpublished.',
+                    },
+                ),
+                status=status.HTTP_409_CONFLICT,
+            )
+        market.status = Market.NOT_PUBLISHED
+        market.status_reason = ''
+        market.save(update_fields=['status', 'status_reason', 'updated_at'])
+        return Response(
+            ApiResponse(success=True, code=200, data={}, message='Market unpublished successfully.'),
+            status=status.HTTP_200_OK,
+        )
 
 
 class MarketLogoAPIView(views.APIView):

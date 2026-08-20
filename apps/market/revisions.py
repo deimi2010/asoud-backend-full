@@ -1,4 +1,4 @@
-from apps.market.models import MarketRevision
+from apps.market.models import Market, MarketRevision
 
 
 def json_payload(validated_data):
@@ -36,4 +36,7 @@ def save_pending_section(*, market, user, section, data):
             'created_by', 'payload', 'reviewed_by', 'reviewed_at',
             'rejection_reason', 'updated_at',
         ])
+    market.status = Market.QUEUE
+    market.status_reason = ''
+    market.save(update_fields=['status', 'status_reason', 'updated_at'])
     return revision

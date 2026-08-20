@@ -89,3 +89,18 @@ class MarketPublicationAdminView(views.APIView):
             'status': market.status,
             'commission_count': len(commissions),
         })
+
+
+class MarketReactivateAdminView(views.APIView):
+    permission_classes = [IsPlatformAdmin]
+
+    def post(self, request, market_id):
+        market = get_object_or_404(Market.objects.all(), pk=market_id)
+        if market.status != Market.INACTIVE:
+            raise serializers.ValidationError(
+                {'status': 'Only an inactive store can be reactivated.'}
+            )
+        market.status = Market.DRAFT
+        market.status_reason = ''
+        market.save(update_fields=['status', 'status_reason', 'updated_at'])
+        return Response({'market_id': str(market.id), 'status': market.status})

@@ -75,6 +75,7 @@ class MarketRevisionWorkflowTests(TestCase):
         self.assertEqual(updated.status_code, 202)
         self.market.refresh_from_db()
         self.assertEqual(self.market.name, 'Published name')
+        self.assertEqual(self.market.status, Market.QUEUE)
         revision = MarketRevision.objects.get(market=self.market, status='pending')
 
         self.client.force_authenticate(self.admin)
@@ -87,7 +88,32 @@ class MarketRevisionWorkflowTests(TestCase):
         self.market.refresh_from_db()
         revision.refresh_from_db()
         self.assertEqual(self.market.name, 'Draft name')
+        self.assertEqual(self.market.status, Market.PUBLISHED)
         self.assertEqual(revision.status, MarketRevision.APPROVED)
+
+    def test_owner_can_unpublish_but_cannot_restore_inactive_store(self):
+        self.client.force_authenticate(self.owner)
+        unpublished = self.client.post(
+            f'/api/v1/owner/market/unpublish/{self.market.id}/'
+        )
+        self.assertEqual(unpublished.status_code, 200)
+        self.market.refresh_from_db()
+        self.assertEqual(self.market.status, Market.NOT_PUBLISHED)
+
+        self.market.status = Market.INACTIVE
+        self.market.save(update_fields=['status', 'updated_at'])
+        owner_restore = self.client.post(
+            f'/api/v1/admin/markets/reactivate/{self.market.id}/'
+        )
+        self.assertEqual(owner_restore.status_code, 403)
+
+        self.client.force_authenticate(self.admin)
+        restored = self.client.post(
+            f'/api/v1/admin/markets/reactivate/{self.market.id}/'
+        )
+        self.assertEqual(restored.status_code, 200)
+        self.market.refresh_from_db()
+        self.assertEqual(self.market.status, Market.DRAFT)
 
     def test_state_changes_reject_get_and_validate_transition(self):
         self.client.force_authenticate(self.owner)

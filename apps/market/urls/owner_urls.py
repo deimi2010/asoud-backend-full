@@ -12,6 +12,7 @@ from apps.market.views.owner_views import (
     MarketContactGetAPIView,
     MarketContactUpdateAPIView,
     MarketInactiveAPIView,
+    MarketUnpublishAPIView,
     MarketQueueAPIView,
     MarketLogoAPIView,
     MarketBackgroundAPIView,
@@ -102,6 +103,11 @@ urlpatterns = [
         'queue/<str:pk>/',
         MarketQueueAPIView.as_view(),
         name='queue',
+    ),
+    path(
+        'unpublish/<str:pk>/',
+        MarketUnpublishAPIView.as_view(),
+        name='unpublish',
     ),
 
     # market ui

@@ -462,16 +462,7 @@ class PostPaymentCore:
                 user=self.user,
             )
             market.is_paid = True
-            if market.status in (
-                Market.DRAFT,
-                Market.NOT_PUBLISHED,
-                Market.NEEDS_EDITING,
-            ):
-                market.status = Market.QUEUE
-            market.status_reason = ''
-            market.save(
-                update_fields=['status', 'status_reason', 'is_paid', 'updated_at']
-            )
+            market.save(update_fields=['is_paid', 'updated_at'])
             return
 
         raise ValueError('Unsupported payment target')

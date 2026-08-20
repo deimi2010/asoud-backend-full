@@ -46,8 +46,13 @@ def review_market_revision(*, revision, reviewer, action, reason=''):
             serializer.is_valid(raise_exception=True)
             serializer.save(market=market)
         revision.status = MarketRevision.APPROVED
+        market.status = Market.PUBLISHED
+        market.status_reason = ''
     else:
         revision.status = MarketRevision.REJECTED
+        market.status = Market.NEEDS_EDITING
+        market.status_reason = reason.strip()
+    market.save(update_fields=['status', 'status_reason', 'updated_at'])
     revision.reviewed_by = reviewer
     revision.reviewed_at = timezone.now()
     revision.rejection_reason = reason
