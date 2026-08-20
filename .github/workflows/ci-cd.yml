@@ -36,6 +36,7 @@ jobs:
       DJANGO_SETTINGS_MODULE: config.settings.production
       DJANGO_SECRET_KEY: ci-placeholder-value-with-at-least-thirty-two-characters
       ASOUD_RATE_LIMIT_KEY_SECRET: ci-placeholder-rate-value-with-at-least-thirty-two-characters
+      DJANGO_ALLOWED_HOSTS: asoud.example,localhost,127.0.0.1
       DATABASE_NAME: ci
       DATABASE_USERNAME: ci
       DATABASE_PASSWORD: ci-placeholder
