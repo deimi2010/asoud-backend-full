@@ -67,6 +67,33 @@ def review_market_publication(*, market, reviewer, action, reason=''):
     # Reserved for the publication audit model introduced with the real baseline.
     del reviewer
     market = Market.objects.select_for_update().get(pk=market.pk)
+    if market.status == Market.PUBLISHED and action == 'approve':
+        payment = (
+            Payment.objects.select_for_update()
+            .filter(
+                status=Payment.COMPLETE,
+                user_id=market.user_id,
+                target_id=market.id,
+                amount__isnull=False,
+            )
+            .order_by('-created_at')
+            .first()
+        )
+        if (
+            payment is None
+            or not payment.target_content_type
+            or payment.target_content_type.model_class() is not Market
+        ):
+            raise serializers.ValidationError(
+                {'payment': 'Completed store subscription payment required.'}
+            )
+        from apps.referral.services import accrue_store_publication_commissions
+
+        commissions = accrue_store_publication_commissions(
+            market=market,
+            payment=payment,
+        )
+        return market, commissions
     if market.status != Market.QUEUE:
         raise serializers.ValidationError(
             {'action': 'Only a queued store can be reviewed.'}

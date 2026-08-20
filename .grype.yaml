@@ -10,6 +10,18 @@
 # - CVE-2026-11972: e86666c9dd256d52d0fbef6feb1ea4a51768fdec
 # - CVE-2026-15308: 07efb08123ba9367a7107325adb9d5626dca1ca9
 ignore:
+  # Alpine has not published a fixed OpenSSL package for CVE-2026-14456 yet.
+  # Keep these exceptions pinned to the exact affected package revision.
+  - vulnerability: CVE-2026-14456
+    package:
+      name: libcrypto3
+      version: 3.5.7-r0
+      type: apk
+  - vulnerability: CVE-2026-14456
+    package:
+      name: libssl3
+      version: 3.5.7-r0
+      type: apk
   - vulnerability: CVE-2026-11940
     package:
       name: python

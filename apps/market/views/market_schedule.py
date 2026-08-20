@@ -134,6 +134,7 @@ class MarketScheduleListView(views.APIView):
 
 class MarketScheduleReplaceView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MarketScheduleReplaceSerializer
 
     @transaction.atomic
     def put(self, request):

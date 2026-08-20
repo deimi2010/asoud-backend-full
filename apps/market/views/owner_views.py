@@ -736,6 +736,7 @@ class MarketQueueAPIView(views.APIView):
 
 
 class MarketUnpublishAPIView(views.APIView):
+    serializer_class = MarketUpdateSerializer
     permission_classes = [IsStoreOwner]
 
     def post(self, request, pk, format=None):

@@ -26,6 +26,10 @@ class PublicationDecisionSerializer(serializers.Serializer):
         return attrs
 
 
+class EmptyRequestSerializer(serializers.Serializer):
+    pass
+
+
 class MarketRevisionListAdminView(views.APIView):
     permission_classes = [IsPlatformAdmin]
     serializer_class = RevisionDecisionSerializer
@@ -76,7 +80,6 @@ class MarketPublicationAdminView(views.APIView):
         market = get_object_or_404(
             Market.objects.all(),
             pk=market_id,
-            status=Market.QUEUE,
         )
         market, commissions = review_market_publication(
             market=market,
@@ -93,6 +96,7 @@ class MarketPublicationAdminView(views.APIView):
 
 class MarketReactivateAdminView(views.APIView):
     permission_classes = [IsPlatformAdmin]
+    serializer_class = EmptyRequestSerializer
 
     def post(self, request, market_id):
         market = get_object_or_404(Market.objects.all(), pk=market_id)

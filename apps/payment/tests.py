@@ -93,9 +93,10 @@ class PaymentCreateSecurityTests(TestCase):
     def test_store_subscription_amount_is_server_authoritative(self):
         market = self.product.market
         market.status = Market.DRAFT
+        market.is_paid = False
         market.sub_category.market_fee = Decimal('2500')
         market.sub_category.save(update_fields=['market_fee', 'updated_at'])
-        market.save(update_fields=['status', 'updated_at'])
+        market.save(update_fields=['status', 'is_paid', 'updated_at'])
         MarketContact.objects.create(
             market=market,
             first_mobile_number=self.user.mobile_number,
