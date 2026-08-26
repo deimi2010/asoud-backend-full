@@ -126,7 +126,7 @@ class PaymentCore:
         callback_url = os.environ.get('PAYMENT_CALLBACK_URL') or getattr(
             settings,
             'PAYMENT_CALLBACK_URL',
-            'https://asoud.ir/api/v1/user/payments/verify/',
+            'https://asoud.ir/api/v1/user/payments/verify/?return_to_app=1',
         )
         gateway_subdomain = getattr(settings, 'ZARINPAL_URL', 'api')
         url = f'https://{gateway_subdomain}.zarinpal.com/pg/v4/payment/request.json'

@@ -12,6 +12,7 @@ from apps.market.models import Market, MarketContact, MarketLocation
 from apps.payment.core import PaymentCore, PostPaymentCore
 from apps.payment.models import Payment, Zarinpal
 from apps.payment.serializers.user import PaymentCreateSerializer
+from apps.payment.views import PaymentCreateView, PaymentVerifyView
 from apps.product.models import Product
 from apps.region.models import City, Country, Province
 from apps.users.models import User
@@ -213,6 +214,67 @@ class PaymentCreateSecurityTests(TestCase):
         _, kwargs = post.call_args
         self.assertEqual(kwargs['json']['amount'], 2500)
         self.assertEqual(kwargs['timeout'], PaymentCore.request_timeout)
+
+    @patch.dict('os.environ', {'ZARINPAL_MERCHANT_ID': 'test-merchant'})
+    @patch('apps.payment.core.requests.post')
+    def test_create_endpoint_returns_payment_status_and_redirect_url(self, post):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {'data': {'authority': 'authority-api'}}
+        post.return_value = response
+        request = APIRequestFactory().post(
+            '/api/v1/user/payments/create/',
+            {
+                'amount': '2500',
+                'target': 'wallet',
+                'target_id': str(self.wallet.id),
+                'gateway': 'zarinpal',
+            },
+            format='json',
+        )
+        force_authenticate(request, user=self.user)
+
+        with patch.object(PaymentCreateView, 'throttle_classes', []):
+            api_response = PaymentCreateView.as_view()(request)
+
+        self.assertEqual(api_response.status_code, 201)
+        data = api_response.data['data']
+        self.assertEqual(data['status'], Payment.PENDING)
+        self.assertTrue(data['id'])
+        self.assertTrue(data['gateway_session_id'])
+        self.assertIn('/api/v1/user/payments/pay?id=', data['redirect_url'])
+
+    @patch('apps.payment.views.payment.verify', return_value=(True, 'ok'))
+    def test_browser_callback_can_return_to_the_mobile_app(self, verify):
+        payment = Payment.objects.create(
+            user=self.user,
+            amount=Decimal('2500'),
+            target_content_type=ContentType.objects.get_for_model(Wallet),
+            target_id=self.wallet.id,
+            status=Payment.COMPLETE,
+        )
+        Zarinpal.objects.create(
+            payment=payment,
+            authority='authority-api',
+            transaction_id='reference-api',
+        )
+        request = APIRequestFactory().get(
+            '/api/v1/user/payments/verify/',
+            {
+                'Authority': 'authority-api',
+                'Status': 'OK',
+                'return_to_app': '1',
+            },
+        )
+
+        response = PaymentVerifyView.as_view()(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            f'asoud:///payment?status=success&payment_id={payment.id}',
+        )
+        verify.assert_called_once()
 
     @patch.object(OrderItem, 'total_price', return_value=Decimal('1500.000'))
     @patch.dict('os.environ', {'ZARINPAL_MERCHANT_ID': 'test-merchant'})

@@ -2,6 +2,8 @@ from rest_framework import serializers
 from apps.discount.models import Discount
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema_field
 
 
 class DiscountCreateSerializer(serializers.ModelSerializer):
@@ -105,6 +107,7 @@ class DiscountListSerializer(serializers.ModelSerializer):
             'created_at',
         ]
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_status(self, obj):
         if not obj.is_active:
             return 'inactive'
@@ -114,6 +117,7 @@ class DiscountListSerializer(serializers.ModelSerializer):
             return 'full'
         return 'active'
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_remaining(self, obj):
         if obj.limitation == 0:
             return None
@@ -123,9 +127,11 @@ class DiscountListSerializer(serializers.ModelSerializer):
         target = obj.content_object
         return target if obj.content_type.model == 'market' else target.market
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_store_name(self, obj):
         return self._market(obj).name
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_store_business_id(self, obj):
         return self._market(obj).business_id
 

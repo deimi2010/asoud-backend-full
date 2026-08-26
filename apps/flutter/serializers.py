@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_field
 
 from apps.market.models import Market
@@ -16,7 +17,7 @@ class PublicProductDetailSerializer(ProductDetailSerializer):
 
     required_product = serializers.SerializerMethodField()
     gift_product = serializers.SerializerMethodField()
-    market_id = serializers.UUIDField(source='market_id', read_only=True)
+    market_id = serializers.UUIDField(read_only=True)
     market_business_id = serializers.CharField(
         source='market.business_id', read_only=True,
     )
@@ -79,9 +80,11 @@ class PublicProductDetailSerializer(ProductDetailSerializer):
     def get_gift_product(self, obj):
         return self._public_related(obj.gift_product)
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_likes_count(self, obj):
         return obj.liked_by.filter(is_active=True).count()
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_views_count(self, obj):
         return AnalyticsEvent.objects.filter(
             product=obj,
@@ -95,12 +98,15 @@ class PublicProductDetailSerializer(ProductDetailSerializer):
             return False
         return relation.filter(user=user, is_active=True).exists()
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_liked(self, obj):
         return self._user_state(obj, obj.liked_by)
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_bookmarked(self, obj):
         return self._user_state(obj, obj.bookmarked_by)
 
+    @extend_schema_field(OpenApiTypes.URI)
     def get_voice_guide_url(self, obj):
         guide = VoiceGuide.objects.first()
         if not guide or not guide.product_file:
@@ -117,3 +123,17 @@ class PublicProductDetailEnvelopeSerializer(serializers.Serializer):
     success = serializers.BooleanField()
     code = serializers.IntegerField()
     data = PublicProductDetailSerializer()
+
+
+class ProductLikeActionSerializer(serializers.Serializer):
+    is_liked = serializers.BooleanField(read_only=True)
+    likes_count = serializers.IntegerField(read_only=True)
+
+
+class ProductBookmarkActionSerializer(serializers.Serializer):
+    is_bookmarked = serializers.BooleanField(read_only=True)
+
+
+class ProductReportActionSerializer(serializers.Serializer):
+    description = serializers.CharField(max_length=2000, write_only=True)
+    submitted = serializers.BooleanField(read_only=True)

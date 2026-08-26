@@ -743,6 +743,7 @@ class ProductThemeDeleteAPIView(views.APIView):
 class ProductThemeManageAPIView(views.APIView):
     """Replace or remove a layout while keeping its products intact."""
 
+    serializer_class = ProductThemeLayoutSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def _get_theme(self, request, pk):

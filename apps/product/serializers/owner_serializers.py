@@ -404,36 +404,44 @@ class ProductDiscountPresentationMixin(serializers.Serializer):
             return discount
         return None
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_discount_percentage(self, obj):
         discount = self._active_discount(obj)
         return discount.percentage if discount else 0
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_discount_type(self, obj):
         discount = self._active_discount(obj)
         return discount.discount_type if discount else None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_discount_position(self, obj):
         discount = self._active_discount(obj)
         return discount.position if discount else None
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_discount_days(self, obj):
         discount = self._active_discount(obj)
         return discount.duration if discount else None
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_discount_people(self, obj):
         discount = self._active_discount(obj)
         return discount.limitation if discount else None
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_discount_remaining(self, obj):
         discount = self._active_discount(obj)
         if not discount or discount.discount_type != ProductDiscount.GROUP:
             return None
         return max(0, discount.limitation - discount.consumed - discount.reserved)
 
+    @extend_schema_field(OpenApiTypes.DATETIME)
     def get_discount_expires_at(self, obj):
         discount = self._active_discount(obj)
         return discount.expiry if discount else None
 
+    @extend_schema_field(OpenApiTypes.DECIMAL)
     def get_discounted_price(self, obj):
         discount = self._active_discount(obj)
         if discount is None:
@@ -566,14 +574,17 @@ class ProductDetailSerializer(ProductDiscountPresentationMixin, serializers.Mode
     def get_comments_count(self, obj):
         return obj.comments.count()
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_likes_count(self, obj):
         return obj.liked_by.filter(is_active=True).count()
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_views_count(self, obj):
         return obj.analytics_events.filter(
             event_type=AnalyticsEvent.PRODUCT_VIEW,
         ).count()
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_liked(self, obj):
         user = getattr(self.context.get('request'), 'user', None)
         return bool(
@@ -581,6 +592,7 @@ class ProductDetailSerializer(ProductDiscountPresentationMixin, serializers.Mode
             and obj.liked_by.filter(user=user, is_active=True).exists()
         )
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_bookmarked(self, obj):
         user = getattr(self.context.get('request'), 'user', None)
         return bool(
@@ -588,6 +600,7 @@ class ProductDetailSerializer(ProductDiscountPresentationMixin, serializers.Mode
             and obj.bookmarked_by.filter(user=user, is_active=True).exists()
         )
 
+    @extend_schema_field(OpenApiTypes.URI)
     def get_voice_guide_url(self, obj):
         guide = VoiceGuide.objects.first()
         if not guide or not guide.product_file:

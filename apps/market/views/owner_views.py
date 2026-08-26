@@ -39,6 +39,7 @@ def _manageable_markets(user):
 
 
 class MarketShippingMethodListCreateAPIView(views.APIView):
+    serializer_class = MarketShippingMethodSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def _market(self, request, market_id):
@@ -74,6 +75,7 @@ class MarketShippingMethodListCreateAPIView(views.APIView):
 
 
 class MarketShippingMethodDetailAPIView(views.APIView):
+    serializer_class = MarketShippingMethodSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def _method(self, request, pk):

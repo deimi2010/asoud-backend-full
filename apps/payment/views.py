@@ -1,8 +1,11 @@
 import logging
+import os
 
 from rest_framework import views, status, permissions
 from rest_framework.response import Response
 from django.shortcuts import redirect
+from django.http import HttpResponseRedirect
+from django.urls import reverse
 from django.conf import settings
 from utils.response import ApiResponse
 from apps.payment.core import PaymentCore
@@ -16,6 +19,10 @@ from drf_spectacular.utils import OpenApiResponse, extend_schema
 
 payment = PaymentCore()
 logger = logging.getLogger(__name__)
+
+
+class MobileAppRedirect(HttpResponseRedirect):
+    allowed_schemes = [*HttpResponseRedirect.allowed_schemes, 'asoud']
 
 # Create your views here.
 class PaymentCreateView(views.APIView):
@@ -33,11 +40,19 @@ class PaymentCreateView(views.APIView):
             )
 
             if success:
+                serialized_payment = PaymentDetailSerializer(data.payment).data
+                redirect_url = request.build_absolute_uri(
+                    f"{reverse('user_payment:payment-redirect')}?id={data.id}"
+                )
                 return Response(
                     ApiResponse(
                         success=True,
                         code=201,
-                        data= {'id': str(data.id)}
+                        data={
+                            **serialized_payment,
+                            'gateway_session_id': str(data.id),
+                            'redirect_url': redirect_url,
+                        },
                     ),
                     status=status.HTTP_201_CREATED
                 )
@@ -154,6 +169,13 @@ class PaymentVerifyView(views.APIView):
             )
         
         if success:
+            if request.GET.get('return_to_app') == '1':
+                return MobileAppRedirect(
+                    _payment_app_return_url(
+                        'success',
+                        _callback_payment_id(request),
+                    )
+                )
             return Response(
                 ApiResponse(
                     success=True,
@@ -164,6 +186,13 @@ class PaymentVerifyView(views.APIView):
             )
         
         else:
+            if request.GET.get('return_to_app') == '1':
+                return MobileAppRedirect(
+                    _payment_app_return_url(
+                        'failed',
+                        _callback_payment_id(request),
+                    )
+                )
             return Response(
                 ApiResponse(
                     success=False,
@@ -175,6 +204,30 @@ class PaymentVerifyView(views.APIView):
                 ),
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+
+def _callback_payment_id(request):
+    authority = request.GET.get('Authority')
+    if not authority:
+        return None
+    return (
+        Zarinpal.objects.filter(authority=authority)
+        .values_list('payment_id', flat=True)
+        .first()
+    )
+
+
+def _payment_app_return_url(result, payment_id=None):
+    base_url = os.environ.get('PAYMENT_APP_RETURN_URL') or getattr(
+        settings,
+        'PAYMENT_APP_RETURN_URL',
+        'asoud:///payment',
+    )
+    separator = '&' if '?' in base_url else '?'
+    suffix = f'status={result}'
+    if payment_id:
+        suffix += f'&payment_id={payment_id}'
+    return f'{base_url}{separator}{suffix}'
 
 class PaymentListView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]

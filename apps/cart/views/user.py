@@ -253,8 +253,13 @@ class CartViewSet(viewsets.ViewSet):
 
         serializer = Order2Serializer(order)
         return Response(
-            {"message": "Order placed successfully", "order": serializer.data},
-            status=status.HTTP_200_OK
+            ApiResponse(
+                success=True,
+                code=200,
+                message="Order placed successfully",
+                data={"order": serializer.data},
+            ),
+            status=status.HTTP_200_OK,
         )
 
 class OrderCreateView(views.APIView):

@@ -19,6 +19,9 @@ from apps.flutter.serializers import (
     ProductDetailQuerySerializer,
     PublicProductDetailEnvelopeSerializer,
     PublicProductDetailSerializer,
+    ProductLikeActionSerializer,
+    ProductBookmarkActionSerializer,
+    ProductReportActionSerializer,
 )
 from apps.advertise.models import Advertisement
 from apps.advertise.serializers import AdvertiseSerializer
@@ -146,6 +149,7 @@ def _public_product_for_user(user, product_id):
 
 
 class ProductLikeView(views.APIView):
+    serializer_class = ProductLikeActionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
@@ -163,6 +167,7 @@ class ProductLikeView(views.APIView):
 
 
 class ProductBookmarkView(views.APIView):
+    serializer_class = ProductBookmarkActionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
@@ -179,6 +184,7 @@ class ProductBookmarkView(views.APIView):
 
 
 class ProductReportView(views.APIView):
+    serializer_class = ProductReportActionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):

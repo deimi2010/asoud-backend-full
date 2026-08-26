@@ -165,6 +165,8 @@ class CartIntegrityTests(TestCase):
         response = self.checkout()
 
         self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['success'])
+        self.assertTrue(response.data['data']['order']['id'])
         placed = Order.objects.get(user=self.buyer, status=Order.PENDING)
         self.assertEqual(placed.subtotal_amount, Decimal('2000.000'))
         self.assertEqual(placed.payable_amount, Decimal('2000.000'))

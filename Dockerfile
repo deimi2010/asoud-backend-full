@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.19
 
-FROM python:3.14.6-alpine3.24@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92 AS builder
+FROM python:3.14.7-alpine3.24@sha256:05b2b8b732ecd268fee8727a369f936f022d1321b59befd13c30ede22769dcdc AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -17,7 +17,7 @@ RUN apk add --no-cache \
 
 COPY requirements.txt ./requirements.txt
 RUN python -m pip install --no-cache-dir \
-        pip==26.1.2 \
+        pip==26.2 \
         setuptools==83.0.0 \
         wheel==0.47.0 \
     && python -m pip wheel --wheel-dir=/wheels --requirement requirements.txt
@@ -29,35 +29,7 @@ COPY requirements-ml.txt ./requirements-ml.txt
 RUN python -m pip wheel --wheel-dir=/ml-wheels --requirement requirements-ml.txt
 
 
-FROM python:3.14.6-alpine3.24@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92 AS runtime-base
-
-# Python 3.14.6 predates these upstream security backports. Pull the complete
-# patched stdlib modules from one immutable CPython 3.14 commit and verify both
-# their content hashes and the expected fixes during the image build. Remove
-# these overrides, together with the matching Grype exceptions, when the next
-# stable CPython image contains the fixes.
-ADD --checksum=sha256:3c8d585a77d7d376aea66e5e11a4d53c2605100d4c05a71b5385ed54bc526f51 \
-    https://raw.githubusercontent.com/python/cpython/07efb08123ba9367a7107325adb9d5626dca1ca9/Lib/tarfile.py \
-    /usr/local/lib/python3.14/tarfile.py
-ADD --checksum=sha256:5c5ed245889135564e75dfed9a47aeb6b4d3e5a2e9614d918a986767e3747539 \
-    https://raw.githubusercontent.com/python/cpython/07efb08123ba9367a7107325adb9d5626dca1ca9/Lib/html/parser.py \
-    /usr/local/lib/python3.14/html/parser.py
-
-RUN chmod 0644 \
-        /usr/local/lib/python3.14/tarfile.py \
-        /usr/local/lib/python3.14/html/parser.py \
-    && python - <<'PY'
-import inspect
-import tarfile
-from html.parser import HTMLParser
-
-seek_source = inspect.getsource(tarfile._Stream.seek)
-link_source = inspect.getsource(tarfile.TarFile.makelink_with_filter)
-parser = HTMLParser()
-assert "if not data:" in seek_source  # CVE-2026-11972
-assert "unfiltered.replace(name=tarinfo.name, deep=False)" in link_source  # CVE-2026-11940
-assert hasattr(parser, "_pending") and hasattr(parser, "_parse_threshold")  # CVE-2026-15308
-PY
+FROM python:3.14.7-alpine3.24@sha256:05b2b8b732ecd268fee8727a369f936f022d1321b59befd13c30ede22769dcdc AS runtime-base
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \

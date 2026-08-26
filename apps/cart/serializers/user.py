@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from apps.cart.models import (
     Order, 
     OrderItem
@@ -205,11 +206,13 @@ class Order2Serializer(serializers.ModelSerializer):
     def _target(self, item):
         return item.product or item.affiliate
 
+    @extend_schema_field(OpenApiTypes.UUID)
     def get_market_id(self, obj):
         item = obj.items.select_related('product', 'affiliate').first()
         target = self._target(item) if item else None
         return str(target.market_id) if target else None
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_requires_shipping(self, obj):
         for item in obj.items.select_related('product', 'affiliate'):
             target = self._target(item)
@@ -224,6 +227,7 @@ class Order2Serializer(serializers.ModelSerializer):
                 return True
         return False
 
+    @extend_schema_field(serializers.ListField(child=serializers.DictField()))
     def get_shipping_methods(self, obj):
         market_id = self.get_market_id(obj)
         if not market_id or not self.get_requires_shipping(obj):

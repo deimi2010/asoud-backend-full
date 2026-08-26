@@ -3,6 +3,8 @@ import re
 from rest_framework import serializers
 from django.urls import reverse
 import jdatetime
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema_field
 
 from apps.market.models import (
     Market,
@@ -164,6 +166,7 @@ class MarketGatewayConnectionSerializer(serializers.ModelSerializer):
         )
         return attrs
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_has_user_code(self, obj):
         return bool(obj.user_code)
 

@@ -64,6 +64,7 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
     target = serializers.SerializerMethodField()
     target_content = serializers.SerializerMethodField()
     gateway = serializers.SerializerMethodField()
+    transaction_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
@@ -74,6 +75,10 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
             'target_id',
             'target_content',
             'gateway',
+            'status',
+            'created_at',
+            'updated_at',
+            'transaction_id',
         ]
 
     @extend_schema_field(serializers.DictField)
@@ -105,6 +110,13 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
             return {
                 'name': 'none'
             }
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_transaction_id(self, obj):
+        try:
+            return obj.zarinpal_data.transaction_id
+        except Zarinpal.DoesNotExist:
+            return None
 
     @extend_schema_field(serializers.CharField)
     def get_target_content(self, obj):
