@@ -14,6 +14,7 @@ from .models import (
     MarketSchedule,
     MarketRevision,
     MarketGatewayConnection,
+    MarketShippingMethod,
 )
 
 # Register your models here.
@@ -85,6 +86,12 @@ class MarketScheduleTabularInline(BaseTabularInline):
     )
 
 
+class MarketShippingMethodTabularInline(BaseTabularInline):
+    model = MarketShippingMethod
+    extra = 0
+    fields = ('name', 'price', 'is_active')
+
+
 class MarketAdmin(BaseAdmin):
     inlines = [
         MarketLocationTabularInline,
@@ -93,6 +100,7 @@ class MarketAdmin(BaseAdmin):
         MarketThemeTabularInline,
         MarketGatewayConnectionTabularInline,
         MarketScheduleTabularInline,
+        MarketShippingMethodTabularInline,
     ]
 
     list_display = [

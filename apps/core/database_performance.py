@@ -41,7 +41,7 @@ class DatabasePerformanceMiddleware:
         num_queries = len(connection.queries) - start_queries
         
         # Log if performance issues detected
-        if settings.DEBUG or settings.ENVIRONMENT == 'development':
+        if settings.DEBUG or getattr(settings, 'ENVIRONMENT', 'development') == 'development':
             if num_queries > 20:
                 logger.warning(
                     f"High query count detected: {num_queries} queries for {request.path}"

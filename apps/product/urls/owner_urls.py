@@ -10,6 +10,7 @@ from apps.product.views.owner_views import (
     ProductThemeListAPIView,
     ProductThemeUpdateAPIView,
     ProductThemeDeleteAPIView,
+    ProductThemeManageAPIView,
     ProductShippingCreateAPIView,
     ProductShippingListAPIView
 )
@@ -67,5 +68,10 @@ urlpatterns = [
         'theme/delete/<uuid:pk>/',
         ProductThemeDeleteAPIView.as_view(),
         name='theme-delete',
+    ),
+    path(
+        'theme/manage/<uuid:pk>/',
+        ProductThemeManageAPIView.as_view(),
+        name='theme-manage',
     ),
 ]

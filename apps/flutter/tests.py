@@ -5,7 +5,7 @@ from rest_framework.test import APIClient
 
 from apps.category.models import Category, Group, SubCategory
 from apps.market.models import Market
-from apps.product.models import Product
+from apps.product.models import Product, ProductBookmark, ProductLike, ProductReport
 from apps.referral.models import StoreAccess
 from apps.users.models import User
 
@@ -95,3 +95,39 @@ class PublicProductDetailTests(TestCase):
         self.client.force_authenticate(user=None)
         response = self.client.get('/api/v1/storefront/products', {'id': self.product.id})
         self.assertEqual(response.status_code, 401)
+
+    def test_product_interactions_are_persisted_and_returned(self):
+        like_url = f'/api/v1/storefront/products/{self.product.id}/like'
+        bookmark_url = f'/api/v1/storefront/products/{self.product.id}/bookmark'
+        report_url = f'/api/v1/storefront/products/{self.product.id}/report'
+
+        like = self.client.post(like_url)
+        bookmark = self.client.post(bookmark_url)
+        report = self.client.post(report_url, {'description': 'Incorrect content'})
+        detail = self.client.get('/api/v1/storefront/products', {'id': self.product.id})
+
+        self.assertEqual(like.status_code, 200)
+        self.assertTrue(like.data['is_liked'])
+        self.assertEqual(bookmark.status_code, 200)
+        self.assertTrue(bookmark.data['is_bookmarked'])
+        self.assertEqual(report.status_code, 201)
+        self.assertTrue(ProductLike.objects.get().is_active)
+        self.assertTrue(ProductBookmark.objects.get().is_active)
+        self.assertEqual(ProductReport.objects.get().description, 'Incorrect content')
+        self.assertTrue(detail.data['data']['is_liked'])
+        self.assertTrue(detail.data['data']['is_bookmarked'])
+        self.assertEqual(detail.data['data']['likes_count'], 1)
+        self.assertGreaterEqual(detail.data['data']['views_count'], 1)
+
+    def test_like_and_bookmark_are_toggles(self):
+        like_url = f'/api/v1/storefront/products/{self.product.id}/like'
+        bookmark_url = f'/api/v1/storefront/products/{self.product.id}/bookmark'
+
+        self.client.post(like_url)
+        second_like = self.client.post(like_url)
+        self.client.post(bookmark_url)
+        second_bookmark = self.client.post(bookmark_url)
+
+        self.assertFalse(second_like.data['is_liked'])
+        self.assertEqual(second_like.data['likes_count'], 0)
+        self.assertFalse(second_bookmark.data['is_bookmarked'])

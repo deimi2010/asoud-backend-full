@@ -209,6 +209,34 @@ class MarketRevision(BaseModel):
         ]
 
 
+class MarketShippingMethod(BaseModel):
+    market = models.ForeignKey(
+        Market,
+        related_name='shipping_methods',
+        on_delete=models.CASCADE,
+    )
+    name = models.CharField(max_length=64)
+    price = models.DecimalField(max_digits=14, decimal_places=3)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'market_shipping_method'
+        ordering = ('created_at',)
+        constraints = [
+            models.UniqueConstraint(
+                fields=('market', 'name'),
+                name='uniq_market_shipping_method_name',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(price__gte=0),
+                name='market_shipping_price_nonnegative',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.market.name} - {self.name}'
+
+
 class MarketLocation(BaseModel):
     market = models.OneToOneField(
         Market,
@@ -327,8 +355,8 @@ class MarketSlider(BaseModel):
         verbose_name=_('Image'),
     )
 
-    url = models.CharField(
-        max_length=20,
+    url = models.URLField(
+        max_length=500,
         blank=True,
         null=True,
         verbose_name=_('Url'),

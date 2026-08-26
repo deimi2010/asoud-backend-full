@@ -17,8 +17,8 @@ from apps.cart.services import (
 )
 from apps.category.models import Category, Group, SubCategory
 from apps.discount.models import Discount
-from apps.market.models import Market, MarketMembership
-from apps.product.models import Product
+from apps.market.models import Market, MarketMembership, MarketShippingMethod
+from apps.product.models import Product, ProductDiscount
 from apps.users.models import User
 from apps.payment.core import (
     PaymentCore,
@@ -175,6 +175,29 @@ class CartIntegrityTests(TestCase):
         self.client.get('/api/v1/user/order/orders')
         self.assertTrue(Order.objects.filter(user=self.buyer, status=Order.DRAFT).exists())
 
+    def test_group_product_discount_is_automatic_and_reserves_one_customer_slot(self):
+        discount = ProductDiscount.objects.create(
+            product=self.product,
+            discount_type=ProductDiscount.GROUP,
+            percentage=20,
+            duration=7,
+            limitation=2,
+        )
+        self.assertEqual(self.add_product(self.product, 2).status_code, 201)
+
+        response = self.checkout()
+
+        self.assertEqual(response.status_code, 200)
+        order = Order.objects.get(user=self.buyer, status=Order.PENDING)
+        reserve_order_inventory(order)
+        item = order.items.get()
+        discount.refresh_from_db()
+        self.assertEqual(order.subtotal_amount, Decimal('2000.000'))
+        self.assertEqual(order.payable_amount, Decimal('1600.000'))
+        self.assertEqual(item.unit_price, Decimal('800.000'))
+        self.assertEqual(item.product_discount_id, discount.id)
+        self.assertEqual(discount.reserved, 1)
+
     def test_cart_rejects_items_from_a_second_market(self):
         self.assertEqual(self.add_product(self.product).status_code, 201)
 
@@ -184,35 +207,31 @@ class CartIntegrityTests(TestCase):
         order = Order.objects.get(user=self.buyer, status=Order.DRAFT)
         self.assertEqual(order.items.count(), 1)
 
-    def test_customer_paid_shipping_fails_closed_before_and_after_cart_add(self):
-        self.product.ship_cost_pay_type = Product.CUSTOMER
-        self.product.save(update_fields=['ship_cost_pay_type', 'updated_at'])
-
-        rejected_add = self.add_product(self.product)
-
-        self.assertEqual(rejected_add.status_code, 400)
-        self.assertEqual(
-            rejected_add.data['error']['code'],
-            'shipping_contract_unavailable',
+    def test_store_shipping_is_selected_once_for_the_whole_order(self):
+        method = MarketShippingMethod.objects.create(
+            market=self.market,
+            name='Courier',
+            price=Decimal('250.000'),
         )
-
-        self.product.ship_cost_pay_type = Product.FREE
+        self.product.ship_cost_pay_type = Product.STORE_SHIPPING
         self.product.save(update_fields=['ship_cost_pay_type', 'updated_at'])
-        self.assertEqual(self.add_product(self.product).status_code, 201)
-        self.product.ship_cost_pay_type = Product.CUSTOMER
-        self.product.save(update_fields=['ship_cost_pay_type', 'updated_at'])
+        self.assertEqual(self.add_product(self.product, 2).status_code, 201)
 
-        rejected_checkout = self.checkout()
+        missing = self.checkout()
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(missing.data['error']['code'], 'shipping_method_required')
 
-        self.assertEqual(rejected_checkout.status_code, 400)
-        self.assertEqual(
-            rejected_checkout.data['error']['code'],
-            'shipping_contract_unavailable',
-        )
-        order = Order.objects.get(user=self.buyer, status=Order.DRAFT)
-        self.assertIsNone(order.payable_amount)
+        response = self.checkout(shipping_method=str(method.id))
+        self.assertEqual(response.status_code, 200)
+        order = Order.objects.get(user=self.buyer, status=Order.PENDING)
+        self.assertEqual(order.subtotal_amount, Decimal('2000.000'))
+        self.assertEqual(order.shipping_amount, Decimal('250.000'))
+        self.assertEqual(order.payable_amount, Decimal('2250.000'))
+        self.assertEqual(order.shipping_method_name_snapshot, 'Courier')
 
-    def test_affiliate_shipping_rejects_customer_paid_listing_or_source(self):
+    def test_affiliate_store_shipping_uses_the_affiliate_market_method(self):
+        self.product.is_marketer = True
+        self.product.save(update_fields=['is_marketer', 'updated_at'])
         affiliate = AffiliateProduct.objects.create(
             market=self.market,
             product=self.product,
@@ -226,34 +245,22 @@ class CartIntegrityTests(TestCase):
             ship_cost_pay_type=AffiliateProduct.CUSTOMER,
         )
 
-        listing_rejected = self.client.post(
+        added = self.client.post(
             '/api/v1/user/order/add_item',
             {'affiliate_id': str(affiliate.id), 'quantity': 1},
             format='json',
         )
-        affiliate.ship_cost_pay_type = AffiliateProduct.FREE
-        affiliate.save(update_fields=['ship_cost_pay_type', 'updated_at'])
-        self.product.ship_cost_pay_type = Product.CUSTOMER
-        self.product.is_marketer = True
-        self.product.save(
-            update_fields=['ship_cost_pay_type', 'is_marketer', 'updated_at']
+        method = MarketShippingMethod.objects.create(
+            market=self.market,
+            name='Post',
+            price=Decimal('100.000'),
         )
-        source_rejected = self.client.post(
-            '/api/v1/user/order/add_item',
-            {'affiliate_id': str(affiliate.id), 'quantity': 1},
-            format='json',
-        )
+        response = self.checkout(shipping_method=str(method.id))
 
-        self.assertEqual(listing_rejected.status_code, 400)
-        self.assertEqual(source_rejected.status_code, 400)
-        self.assertEqual(
-            listing_rejected.data['error']['code'],
-            'shipping_contract_unavailable',
-        )
-        self.assertEqual(
-            source_rejected.data['error']['code'],
-            'shipping_contract_unavailable',
-        )
+        self.assertEqual(added.status_code, 201)
+        self.assertEqual(response.status_code, 200)
+        order = Order.objects.get(user=self.buyer, status=Order.PENDING)
+        self.assertEqual(order.shipping_amount, Decimal('100.000'))
 
     def test_discount_and_stock_reservation_are_idempotent_and_releasable(self):
         discount = Discount.objects.create(

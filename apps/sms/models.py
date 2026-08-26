@@ -1,7 +1,6 @@
 from apps.base.models import models, BaseModel
 from apps.users.models import User
 from django.utils.translation import gettext_lazy as _
-from django.contrib.postgres.fields import ArrayField
 # Create your models here.
 
 class Line(BaseModel):
@@ -77,11 +76,10 @@ class BaseSmsModel(BaseModel):
         on_delete=models.DO_NOTHING     # keep the info for later monetary calculations
     )
     
-    to = ArrayField(
-        models.CharField(
-            max_length=16,
-        ),
-        verbose_name=_('SMSTo')
+    to = models.JSONField(
+        default=list,
+        verbose_name=_('SMSTo'),
+        help_text=_('List of destination mobile numbers'),
     )
 
     cost = models.FloatField(
@@ -127,13 +125,11 @@ class BulkSms(BaseSmsModel):
         default=PENDING
     )
 
-    message_ids = ArrayField(
-        models.CharField(
-            max_length=32
-        ),
+    message_ids = models.JSONField(
         verbose_name=_('Message_ids'),
         null=True,
-        blank=True
+        blank=True,
+        help_text=_('List of provider message identifiers'),
     )
 
     packId = models.CharField(

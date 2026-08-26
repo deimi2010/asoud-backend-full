@@ -19,6 +19,8 @@ from apps.market.views.owner_views import (
     MarketSliderAPIView,
     MarketThemeAPIView,
     MarketGatewayConnectionAPIView,
+    MarketShippingMethodListCreateAPIView,
+    MarketShippingMethodDetailAPIView,
 )
 
 from apps.market.views.market_schedule import (
@@ -136,6 +138,16 @@ urlpatterns = [
         'gateway/<uuid:pk>/',
         MarketGatewayConnectionAPIView.as_view(),
         name='gateway-connection',
+    ),
+    path(
+        'shipping/<uuid:market_id>/',
+        MarketShippingMethodListCreateAPIView.as_view(),
+        name='shipping-list-create',
+    ),
+    path(
+        'shipping/method/<uuid:pk>/',
+        MarketShippingMethodDetailAPIView.as_view(),
+        name='shipping-detail',
     ),
 
     # schedule

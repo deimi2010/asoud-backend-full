@@ -7,7 +7,8 @@ from django.utils import timezone
 from apps.affiliate.models import AffiliateProduct
 from apps.cart.models import Order
 from apps.discount.models import Discount
-from apps.product.models import Product
+from apps.market.models import MarketShippingMethod
+from apps.product.models import Product, ProductDiscount
 
 
 MONEY_QUANTUM = Decimal('0.001')
@@ -86,11 +87,6 @@ def _quantize(value):
 def validate_catalog_target(target):
     if target.status != target.PUBLISHED or target.market.status != target.market.PUBLISHED:
         raise CartIntegrityError('unavailable_item', f'{target.name} is not available.')
-    if target.ship_cost_pay_type == target.CUSTOMER:
-        raise CartIntegrityError(
-            'shipping_contract_unavailable',
-            'Customer-paid shipping is unavailable until checkout can select its price.',
-        )
     if isinstance(target, AffiliateProduct):
         source = target.product
         if (
@@ -102,11 +98,18 @@ def validate_catalog_target(target):
                 'unavailable_item',
                 f'{target.name} is no longer available for affiliate marketing.',
             )
-        if source.ship_cost_pay_type == source.CUSTOMER:
-            raise CartIntegrityError(
-                'shipping_contract_unavailable',
-                'Customer-paid shipping is unavailable until checkout can select its price.',
-            )
+
+
+def _item_requires_store_shipping(item):
+    target = item.product or item.affiliate
+    return (
+        target.type == Product.GOOD
+        and target.sell_type != Product.PERSON
+        and target.ship_cost_pay_type in (
+            Product.STORE_SHIPPING,
+            Product.CUSTOMER,  # legacy value
+        )
+    )
 
 
 def _validate_items(items):
@@ -215,6 +218,74 @@ def _discountable_subtotal(discount, items):
     return sum((item.total_price() for item in eligible), Decimal('0'))
 
 
+def _code_discount_applies_to_item(discount, item, market_id):
+    if discount is None:
+        return False
+    if discount.content_type.model == 'market':
+        return discount.object_id == market_id
+    product_id = item.product_id or (
+        item.affiliate.product_id if item.affiliate_id else None
+    )
+    return (
+        discount.content_type.model == 'product'
+        and discount.object_id == product_id
+    )
+
+
+def _automatic_discounts(items, order):
+    product_ids = {
+        item.product_id or item.affiliate.product_id
+        for item in items
+    }
+    rows = list(
+        ProductDiscount.objects.select_for_update()
+        .filter(product_id__in=product_ids, is_active=True)
+        .order_by('product_id', '-percentage', '-created_at')
+    )
+    now = timezone.now()
+    result = {}
+    for discount in rows:
+        if discount.product_id in result:
+            continue
+        if discount.expiry and discount.expiry <= now:
+            continue
+        if (
+            discount.discount_type == ProductDiscount.GROUP
+            and (
+                discount.limitation <= discount.consumed + discount.reserved
+                or discount.users.filter(id=order.user_id).exists()
+            )
+        ):
+            continue
+        result[discount.product_id] = discount
+    return result
+
+
+def _validate_automatic_discount(discount, order):
+    if not discount.is_active or (discount.expiry and discount.expiry <= timezone.now()):
+        raise CartIntegrityError('product_discount_inactive', 'Product discount is unavailable.')
+    if discount.discount_type == ProductDiscount.GROUP:
+        if discount.users.filter(id=order.user_id).exists():
+            raise CartIntegrityError(
+                'product_discount_already_used',
+                'Group product discount was already used by this customer.',
+            )
+        already_reserved = discount.order_items.filter(
+            order__user_id=order.user_id,
+            order__inventory_status=Order.INVENTORY_RESERVED,
+        ).exclude(order_id=order.id).exists()
+        if already_reserved:
+            raise CartIntegrityError(
+                'product_discount_already_reserved',
+                'Group product discount is already reserved for this customer.',
+            )
+        if discount.limitation <= discount.consumed + discount.reserved:
+            raise CartIntegrityError(
+                'product_discount_limit_reached',
+                'Group product discount capacity has been reached.',
+            )
+
+
 @transaction.atomic
 def clear_order_snapshot(order):
     order = _lock_order(order)
@@ -223,6 +294,9 @@ def clear_order_snapshot(order):
     order.discount_percentage_snapshot = 0
     order.subtotal_amount = None
     order.discount_amount = Decimal('0')
+    order.shipping_method = None
+    order.shipping_method_name_snapshot = ''
+    order.shipping_amount = Decimal('0')
     order.payable_amount = None
     order.save(
         update_fields=[
@@ -231,26 +305,26 @@ def clear_order_snapshot(order):
             'discount_percentage_snapshot',
             'subtotal_amount',
             'discount_amount',
+            'shipping_method',
+            'shipping_method_name_snapshot',
+            'shipping_amount',
             'payable_amount',
             'updated_at',
         ]
     )
-    order.items.update(unit_price=None)
+    order.items.update(
+        unit_price=None,
+        product_discount=None,
+        product_discount_percentage_snapshot=0,
+    )
 
 
 @transaction.atomic
-def snapshot_order(order, discount_code=''):
+def snapshot_order(order, discount_code='', shipping_method_id=None):
     order = _lock_order(order)
     items = _locked_items(order)
     market_id = _validate_items(items)
-    for item in items:
-        target = item.product or item.affiliate
-        item.unit_price = target.main_price if item.product_id else target.price
-        item.save(update_fields=['unit_price', 'updated_at'])
-
-    subtotal = _quantize(sum((item.total_price() for item in items), Decimal('0')))
     discount = None
-    discount_amount = Decimal('0')
     if discount_code:
         try:
             discount = (
@@ -261,17 +335,85 @@ def snapshot_order(order, discount_code=''):
         except Discount.DoesNotExist as exc:
             raise CartIntegrityError('discount_not_found', 'Discount code is not valid.') from exc
         _validate_discount(discount, order, items, market_id, include_reservations=False)
-        eligible_subtotal = _discountable_subtotal(discount, items)
-        discount_amount = _quantize(
-            eligible_subtotal * Decimal(discount.percentage) / Decimal('100')
+
+    shipping_required = any(_item_requires_store_shipping(item) for item in items)
+    shipping_method = None
+    if shipping_required:
+        if not shipping_method_id:
+            raise CartIntegrityError(
+                'shipping_method_required',
+                'Select one shipping method for this order.',
+            )
+        try:
+            shipping_method = MarketShippingMethod.objects.select_for_update().get(
+                id=shipping_method_id,
+                market_id=market_id,
+                is_active=True,
+            )
+        except MarketShippingMethod.DoesNotExist as exc:
+            raise CartIntegrityError(
+                'shipping_method_invalid',
+                'Selected shipping method is unavailable for this store.',
+            ) from exc
+    elif shipping_method_id:
+        raise CartIntegrityError(
+            'shipping_not_required',
+            'This order does not require a paid shipping method.',
         )
+
+    automatic = _automatic_discounts(items, order)
+    subtotal = Decimal('0')
+    payable = Decimal('0')
+    code_was_used = False
+    for item in items:
+        target = item.product or item.affiliate
+        base_price = target.main_price if item.product_id else target.price
+        product_id = item.product_id or item.affiliate.product_id
+        automatic_discount = automatic.get(product_id)
+        automatic_percentage = automatic_discount.percentage if automatic_discount else 0
+        code_percentage = (
+            discount.percentage
+            if _code_discount_applies_to_item(discount, item, market_id)
+            else 0
+        )
+
+        # Discounts never stack. On a tie, prefer the code so a group slot is not consumed.
+        automatic_wins = automatic_percentage > code_percentage
+        applied_percentage = automatic_percentage if automatic_wins else code_percentage
+        code_was_used = code_was_used or (code_percentage > 0 and not automatic_wins)
+        item.unit_price = _quantize(
+            Decimal(base_price) * (Decimal('100') - Decimal(applied_percentage))
+            / Decimal('100')
+        )
+        item.product_discount = automatic_discount if automatic_wins else None
+        item.product_discount_percentage_snapshot = (
+            automatic_percentage if automatic_wins else 0
+        )
+        item.save(update_fields=[
+            'unit_price',
+            'product_discount',
+            'product_discount_percentage_snapshot',
+            'updated_at',
+        ])
+        subtotal += Decimal(base_price) * item.quantity
+        payable += item.unit_price * item.quantity
+
+    subtotal = _quantize(subtotal)
+    payable = _quantize(payable)
+    if discount is not None and not code_was_used:
+        discount = None
+    discount_amount = _quantize(subtotal - payable)
+    shipping_amount = _quantize(shipping_method.price if shipping_method else 0)
 
     order.discount = discount
     order.discount_code_snapshot = discount.code if discount else ''
     order.discount_percentage_snapshot = discount.percentage if discount else 0
     order.subtotal_amount = subtotal
     order.discount_amount = discount_amount
-    order.payable_amount = _quantize(subtotal - discount_amount)
+    order.shipping_method = shipping_method
+    order.shipping_method_name_snapshot = shipping_method.name if shipping_method else ''
+    order.shipping_amount = shipping_amount
+    order.payable_amount = _quantize(payable + shipping_amount)
     if order.payable_amount <= 0:
         raise CartIntegrityError('invalid_total', 'Order total must be positive.')
     if (
@@ -289,6 +431,9 @@ def snapshot_order(order, discount_code=''):
             'discount_percentage_snapshot',
             'subtotal_amount',
             'discount_amount',
+            'shipping_method',
+            'shipping_method_name_snapshot',
+            'shipping_amount',
             'payable_amount',
             'updated_at',
         ]
@@ -309,13 +454,17 @@ def reserve_order_inventory(order):
     items = _locked_items(order)
     market_id = _validate_items(items)
     if order.payable_amount is None:
-        snapshot_order(order, order.discount_code_snapshot)
+        snapshot_order(
+            order,
+            order.discount_code_snapshot,
+            order.shipping_method_id,
+        )
         items = _locked_items(order)
     else:
         current_snapshot_subtotal = _quantize(
             sum((item.total_price() for item in items), Decimal('0'))
         )
-        if current_snapshot_subtotal != order.subtotal_amount:
+        if _quantize(current_snapshot_subtotal + order.shipping_amount) != order.payable_amount:
             raise CartIntegrityError(
                 'order_changed',
                 'Order items changed after checkout; create a new order.',
@@ -330,6 +479,15 @@ def reserve_order_inventory(order):
         _validate_discount(discount, order, items, market_id)
         discount.reserved += 1
         discount.save(update_fields=['reserved', 'updated_at'])
+
+    product_discount_ids = {item.product_discount_id for item in items if item.product_discount_id}
+    for product_discount in ProductDiscount.objects.select_for_update().filter(
+        id__in=product_discount_ids,
+    ).order_by('id'):
+        _validate_automatic_discount(product_discount, order)
+        if product_discount.discount_type == ProductDiscount.GROUP:
+            product_discount.reserved += 1
+            product_discount.save(update_fields=['reserved', 'updated_at'])
 
     for item in items:
         target = item.product or item.affiliate
@@ -357,6 +515,18 @@ def release_order_inventory(order, *, terminal=True):
             raise CartIntegrityError('discount_state', 'Discount reservation is inconsistent.')
         discount.reserved -= 1
         discount.save(update_fields=['reserved', 'updated_at'])
+    product_discount_ids = {item.product_discount_id for item in items if item.product_discount_id}
+    for product_discount in ProductDiscount.objects.select_for_update().filter(
+        id__in=product_discount_ids,
+    ).order_by('id'):
+        if product_discount.discount_type == ProductDiscount.GROUP:
+            if product_discount.reserved < 1:
+                raise CartIntegrityError(
+                    'product_discount_state',
+                    'Product discount reservation is inconsistent.',
+                )
+            product_discount.reserved -= 1
+            product_discount.save(update_fields=['reserved', 'updated_at'])
     order.inventory_status = (
         Order.INVENTORY_RELEASED if terminal else Order.INVENTORY_NONE
     )
@@ -378,6 +548,21 @@ def confirm_order_inventory(order):
         discount.reserved -= 1
         discount.consumed += 1
         discount.save(update_fields=['reserved', 'consumed', 'updated_at'])
+    items = _locked_items(order)
+    product_discount_ids = {item.product_discount_id for item in items if item.product_discount_id}
+    for product_discount in ProductDiscount.objects.select_for_update().filter(
+        id__in=product_discount_ids,
+    ).order_by('id'):
+        if product_discount.discount_type == ProductDiscount.GROUP:
+            if product_discount.reserved < 1:
+                raise CartIntegrityError(
+                    'product_discount_state',
+                    'Product discount reservation is inconsistent.',
+                )
+            product_discount.reserved -= 1
+            product_discount.consumed += 1
+            product_discount.save(update_fields=['reserved', 'consumed', 'updated_at'])
+            product_discount.users.add(order.user)
     order.inventory_status = Order.INVENTORY_CONFIRMED
     order.save(update_fields=['inventory_status', 'updated_at'])
     return order

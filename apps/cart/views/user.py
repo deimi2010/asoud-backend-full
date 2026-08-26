@@ -237,7 +237,12 @@ class CartViewSet(viewsets.ViewSet):
                 order.description = serializer.validated_data.get('description', 'Order placed')
                 order.type = serializer.validated_data.get('type', Order.ONLINE)
                 order.save(update_fields=['description', 'type', 'updated_at'])
-                snapshot_order(order, serializer.validated_data.get('discount_code', ''))
+                shipping_method = serializer.validated_data.get('shipping_method')
+                snapshot_order(
+                    order,
+                    serializer.validated_data.get('discount_code', ''),
+                    shipping_method.id if shipping_method else None,
+                )
                 order.status = Order.PENDING
                 order.save(update_fields=['status', 'updated_at'])
         except CartIntegrityError as exc:

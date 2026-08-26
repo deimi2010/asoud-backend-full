@@ -17,12 +17,14 @@ from apps.product.serializers.owner_serializers import (
     ProductThemeCreateEnvelopeSerializer,
     ProductThemeListEnvelopeSerializer,
     ProductThemeUpdateSerializer,
+    ProductThemeLayoutSerializer,
     ProductThemeUpdateEnvelopeSerializer,
     ProductShippingCreateSerializer,
     ProductShipListEnvelopeSerializer,
     ProductShipListSerializer
 )
 from apps.product.models import Product, ProductRevision, ProductTheme
+from apps.product.theme_layouts import product_theme_slot_count
 from apps.market.models import Market
 from apps.advertise.core  import AdvertisementCore
 
@@ -48,6 +50,7 @@ from apps.affiliate.serializers.user import (
 class ProductCreateAPIView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
+    @transaction.atomic
     def post(self, request):
         serializer = ProductCreateSerializer(
             data=request.data,
@@ -391,13 +394,23 @@ class ProductUpdateAPIView(views.APIView):
     serializer_class = ProductUpdateSerializer
 
     def put(self, request, pk):
+        return self._update(request, pk, partial=False)
+
+    def patch(self, request, pk):
+        return self._update(request, pk, partial=True)
+
+    def _update(self, request, pk, *, partial):
         try:
             product = Product.objects.select_related('market').get(pk=pk)
         except Product.DoesNotExist:
             return Response({'detail': 'Product not found.'}, status=status.HTTP_404_NOT_FOUND)
         if not request.user.is_staff and product.market.user_id != request.user.id:
             return Response({'detail': 'Product not found.'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = ProductUpdateSerializer(product, data=request.data)
+        serializer = ProductUpdateSerializer(
+            product,
+            data=request.data,
+            partial=partial,
+        )
         serializer.is_valid(raise_exception=True)
         if product.status == Product.PUBLISHED and not request.user.is_staff:
             payload = {}
@@ -464,6 +477,25 @@ class ProductThemeCreateAPIView(views.APIView):
         )
 
         if serializer.is_valid(raise_exception=True):
+            client_request_id = serializer.validated_data.get('client_request_id')
+            if client_request_id is not None:
+                existing_theme = ProductTheme.objects.filter(
+                    client_request_id=client_request_id,
+                    market=market,
+                ).first()
+                if existing_theme is not None:
+                    return Response(
+                        ApiResponse(
+                            success=True,
+                            code=200,
+                            data=ProductThemeListSerializer(
+                                existing_theme,
+                                context={'request': request},
+                            ).data,
+                            message='Product theme already created.',
+                        ),
+                        status=status.HTTP_200_OK,
+                    )
             serializer.save(
                 market=market,
             )
@@ -607,8 +639,37 @@ class ProductThemeUpdateAPIView(views.APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            requested_index = input_serializer.validated_data['index']
+            if requested_index > product_theme_slot_count(product_theme.order):
+                return Response(
+                    ApiResponse(
+                        success=False,
+                        code=400,
+                        error={
+                            'code': 'theme_slot_out_of_range',
+                            'detail': 'The selected layout does not contain this slot.',
+                        },
+                    ),
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if Product.objects.filter(
+                theme=product_theme,
+                theme_index=str(requested_index),
+            ).exclude(id=product.id).exists():
+                return Response(
+                    ApiResponse(
+                        success=False,
+                        code=409,
+                        error={
+                            'code': 'theme_slot_occupied',
+                            'detail': 'The selected layout slot already contains a product.',
+                        },
+                    ),
+                    status=status.HTTP_409_CONFLICT,
+                )
+
             product.theme = product_theme
-            product.theme_index = str(input_serializer.validated_data['index'])
+            product.theme_index = str(requested_index)
             product.save(update_fields=['theme', 'theme_index', 'updated_at'])
         except Product.DoesNotExist:
             fail_response = ApiResponse(
@@ -677,3 +738,85 @@ class ProductThemeDeleteAPIView(views.APIView):
             message='Product theme removed successfully.',
         )
         return Response(success_response, status=status.HTTP_200_OK)
+
+
+class ProductThemeManageAPIView(views.APIView):
+    """Replace or remove a layout while keeping its products intact."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_theme(self, request, pk):
+        theme = ProductTheme.objects.select_related('market').filter(id=pk).first()
+        if theme is None:
+            return None, Response(
+                ApiResponse(
+                    success=False,
+                    code=404,
+                    error={'code': 'product_theme_not_found', 'detail': 'Product theme not found'},
+                ),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not request.user.is_staff and theme.market.user_id != request.user.id:
+            return None, Response(
+                ApiResponse(
+                    success=False,
+                    code=403,
+                    error={'code': 'permission_denied', 'detail': 'You do not have permission to modify this product theme'},
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return theme, None
+
+    @transaction.atomic
+    def patch(self, request, pk):
+        theme, error = self._get_theme(request, pk)
+        if error:
+            return error
+        serializer = ProductThemeLayoutSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_order = serializer.validated_data['order']
+        if (
+            product_theme_slot_count(theme.order)
+            != product_theme_slot_count(new_order)
+        ):
+            return Response(
+                ApiResponse(
+                    success=False,
+                    code=400,
+                    error={
+                        'code': 'incompatible_theme_capacity',
+                        'detail': (
+                            'A product theme can only be replaced with a '
+                            'layout that has the same number of slots.'
+                        ),
+                    },
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        theme.order = new_order
+        theme.name = f"layout-{theme.order}"
+        theme.save(update_fields=['order', 'name', 'updated_at'])
+        return Response(
+            ApiResponse(
+                success=True,
+                code=200,
+                data=ProductThemeListSerializer(theme, context={'request': request}).data,
+                message='Product theme layout updated successfully.',
+            )
+        )
+
+    @transaction.atomic
+    def delete(self, request, pk):
+        theme, error = self._get_theme(request, pk)
+        if error:
+            return error
+        theme.products.update(theme=None, theme_index=None)
+        theme.delete()
+        return Response(
+            ApiResponse(
+                success=True,
+                code=200,
+                data={},
+                message='Product theme deleted; products were preserved.',
+            )
+        )

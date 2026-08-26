@@ -9,7 +9,9 @@ from apps.market.serializers.user_serializers import (
     MarketListSerializer,
     MarketDetailSerializer
 )
-from apps.product.models import Product, ProductTheme
+from apps.product.models import (
+    Product, ProductBookmark, ProductLike, ProductReport, ProductTheme,
+)
 from apps.product.serializers.owner_serializers import (
     ProductThemeListSerializer,
 )
@@ -115,15 +117,15 @@ class ProductDetailView(views.APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        serializer = PublicProductDetailSerializer(
-            product,
-            context={'request': request},
-        )
         AnalyticsRecorder.record_request(
             request,
             AnalyticsEvent.PRODUCT_VIEW,
             product=product,
             market=product.market,
+        )
+        serializer = PublicProductDetailSerializer(
+            product,
+            context={'request': request},
         )
 
         return Response(
@@ -133,6 +135,69 @@ class ProductDetailView(views.APIView):
                 data=serializer.data
             )
         )
+
+
+def _public_product_for_user(user, product_id):
+    return Product.objects.filter(
+        market__in=viewable_markets(user),
+        market__status=Market.PUBLISHED,
+        status=Product.PUBLISHED,
+    ).get(id=product_id)
+
+
+class ProductLikeView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            product = _public_product_for_user(request.user, pk)
+        except Product.DoesNotExist:
+            return Response({'detail': 'Product not found.'}, status=status.HTTP_404_NOT_FOUND)
+        like, created = ProductLike.objects.get_or_create(user=request.user, product=product)
+        like.is_active = True if created else not like.is_active
+        like.save(update_fields=['is_active', 'updated_at'])
+        return Response({
+            'is_liked': like.is_active,
+            'likes_count': product.liked_by.filter(is_active=True).count(),
+        })
+
+
+class ProductBookmarkView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            product = _public_product_for_user(request.user, pk)
+        except Product.DoesNotExist:
+            return Response({'detail': 'Product not found.'}, status=status.HTTP_404_NOT_FOUND)
+        bookmark, created = ProductBookmark.objects.get_or_create(
+            user=request.user, product=product,
+        )
+        bookmark.is_active = True if created else not bookmark.is_active
+        bookmark.save(update_fields=['is_active', 'updated_at'])
+        return Response({'is_bookmarked': bookmark.is_active})
+
+
+class ProductReportView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            product = _public_product_for_user(request.user, pk)
+        except Product.DoesNotExist:
+            return Response({'detail': 'Product not found.'}, status=status.HTTP_404_NOT_FOUND)
+        description = str(request.data.get('description', '')).strip()
+        if not description:
+            return Response(
+                {'description': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        ProductReport.objects.create(
+            creator=request.user,
+            product=product,
+            description=description[:2000],
+        )
+        return Response({'submitted': True}, status=status.HTTP_201_CREATED)
 
 
 class AdvertizeDetailView(views.APIView):

@@ -1,4 +1,4 @@
-from rest_framework import views, status
+from rest_framework import views, status, permissions
 from rest_framework.response import Response
 
 from utils.response import ApiResponse
@@ -12,6 +12,7 @@ from apps.market.models import (
     MarketTheme,
     MarketRevision,
     MarketGatewayConnection,
+    MarketShippingMethod,
 )
 from apps.market.revisions import json_payload, save_pending_section
 
@@ -24,8 +25,10 @@ from apps.market.serializers.owner_serializers import (
     MarketContactUpdaterSerializer,
     MarketListSerializer,
     MarketSliderListSerializer,
+    MarketSliderWriteSerializer,
     MarketThemeCreateSerializer,
     MarketGatewayConnectionSerializer,
+    MarketShippingMethodSerializer,
 )
 
 
@@ -33,6 +36,77 @@ def _manageable_markets(user):
     """Return only markets this identity may administer."""
     queryset = Market.objects.all()
     return queryset if user.is_staff else queryset.filter(user=user)
+
+
+class MarketShippingMethodListCreateAPIView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _market(self, request, market_id):
+        return _manageable_markets(request.user).filter(id=market_id).first()
+
+    def get(self, request, market_id):
+        market = self._market(request, market_id)
+        if market is None:
+            return Response({'error': 'Market not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = MarketShippingMethodSerializer(
+            market.shipping_methods.all(), many=True,
+        )
+        return Response(ApiResponse(success=True, code=200, data=serializer.data))
+
+    def post(self, request, market_id):
+        market = self._market(request, market_id)
+        if market is None:
+            return Response({'error': 'Market not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = MarketShippingMethodSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        if market.shipping_methods.filter(
+            name__iexact=serializer.validated_data['name'],
+        ).exists():
+            return Response(
+                {'error': {'code': 'duplicate_shipping_method', 'detail': 'This shipping method already exists.'}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer.save(market=market)
+        return Response(
+            ApiResponse(success=True, code=201, data=serializer.data),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class MarketShippingMethodDetailAPIView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _method(self, request, pk):
+        queryset = MarketShippingMethod.objects.select_related('market')
+        if not request.user.is_staff:
+            queryset = queryset.filter(market__user=request.user)
+        return queryset.filter(id=pk).first()
+
+    def patch(self, request, pk):
+        method = self._method(request, pk)
+        if method is None:
+            return Response({'error': 'Shipping method not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = MarketShippingMethodSerializer(method, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        name = serializer.validated_data.get('name', method.name)
+        if method.market.shipping_methods.filter(name__iexact=name).exclude(id=method.id).exists():
+            return Response(
+                {'error': {'code': 'duplicate_shipping_method', 'detail': 'This shipping method already exists.'}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer.save()
+        return Response(ApiResponse(success=True, code=200, data=serializer.data))
+
+    def delete(self, request, pk):
+        method = self._method(request, pk)
+        if method is None:
+            return Response({'error': 'Shipping method not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if method.orders.exists():
+            method.is_active = False
+            method.save(update_fields=('is_active', 'updated_at'))
+        else:
+            method.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class MarketCreateAPIView(views.APIView):
@@ -1115,7 +1189,20 @@ class MarketSliderAPIView(views.APIView):
         return Response(success_response, status=status.HTTP_200_OK)
 
     def post(self, request, pk):
-        slider_img = request.FILES.get('slider_img')
+        input_serializer = MarketSliderWriteSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        slider_img = input_serializer.validated_data.get('slider_img')
+        slider_url = input_serializer.validated_data.get('url') or None
+
+        if not slider_img:
+            return Response(
+                ApiResponse(
+                    success=False,
+                    code=400,
+                    error={'code': 'slider_image_required', 'detail': 'Slider image is required'},
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             market_obj = _manageable_markets(request.user).get(id=pk)
@@ -1147,11 +1234,13 @@ class MarketSliderAPIView(views.APIView):
         market_slider_img = MarketSlider.objects.create(
             market=market_obj,
             image=slider_img,
+            url=slider_url,
         )
 
-        data = {
-            'slider_img': request.build_absolute_uri(market_slider_img.image.url),
-        }
+        data = MarketSliderListSerializer(
+            market_slider_img,
+            context={'request': request},
+        ).data
 
         success_response = ApiResponse(
             success=True,
@@ -1230,16 +1319,23 @@ class MarketSliderAPIView(views.APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        input_serializer = MarketSliderWriteSerializer(data=request.data, partial=True)
+        input_serializer.is_valid(raise_exception=True)
+
         # Update the image if provided in the request
-        slider_img = request.FILES.get('slider_img')
+        slider_img = input_serializer.validated_data.get('slider_img')
         if slider_img:
             market_slider_obj.image = slider_img
 
+        if 'url' in input_serializer.validated_data:
+            market_slider_obj.url = input_serializer.validated_data.get('url') or None
+
         market_slider_obj.save()
 
-        data = {
-            'slider_img': request.build_absolute_uri(market_slider_obj.image.url),
-        }
+        data = MarketSliderListSerializer(
+            market_slider_obj,
+            context={'request': request},
+        ).data
 
         success_response = ApiResponse(
             success=True,

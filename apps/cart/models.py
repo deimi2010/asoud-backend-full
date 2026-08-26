@@ -171,6 +171,15 @@ class Order(BaseModel):
     discount_percentage_snapshot = models.PositiveSmallIntegerField(default=0)
     subtotal_amount = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
     discount_amount = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal('0'))
+    shipping_method = models.ForeignKey(
+        'market.MarketShippingMethod',
+        related_name='orders',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    shipping_method_name_snapshot = models.CharField(max_length=64, blank=True, default='')
+    shipping_amount = models.DecimalField(max_digits=14, decimal_places=3, default=Decimal('0'))
     payable_amount = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
     inventory_status = models.CharField(
         max_length=10,
@@ -255,6 +264,16 @@ class OrderItem(BaseModel):
         null=True,
         blank=True,
     )
+    product_discount = models.ForeignKey(
+        'product.ProductDiscount',
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name='order_items',
+    )
+    product_discount_percentage_snapshot = models.PositiveSmallIntegerField(
+        default=0,
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -290,5 +309,3 @@ class OrderItem(BaseModel):
         else: 
             price = 0
         return price * self.quantity
-
-

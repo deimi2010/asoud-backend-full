@@ -6,6 +6,7 @@ from apps.cart.models import (
 )
 from apps.product.models import Product, ProductImage
 from apps.affiliate.models import AffiliateProduct, AffiliateProductImage
+from apps.market.models import MarketShippingMethod
 from django.db import transaction
 from apps.cart.services import snapshot_order
 
@@ -21,7 +22,7 @@ class ProductSimpleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Product
-        fields = ('id', 'name', 'images')
+        fields = ('id', 'name', 'images', 'ship_cost_pay_type')
 
 
 class AffiliateImageSerializer(serializers.ModelSerializer):
@@ -35,7 +36,7 @@ class AffiliateSimpleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = AffiliateProduct
-        fields = ('id', 'name', 'images')
+        fields = ('id', 'name', 'images', 'ship_cost_pay_type')
 
 class OrderItem2Serializer(serializers.ModelSerializer):
     product = ProductSimpleSerializer(read_only=True)
@@ -182,10 +183,16 @@ class Order2Serializer(serializers.ModelSerializer):
     items = OrderItem1Serializer(many=True, read_only=True)
     total_price = serializers.SerializerMethodField()
     total_items = serializers.SerializerMethodField()
+    market_id = serializers.SerializerMethodField()
+    requires_shipping = serializers.SerializerMethodField()
+    shipping_methods = serializers.SerializerMethodField()
     
     class Meta:
         model = Order
-        fields = ['id', 'items', 'total_price', 'total_items', 'created_at', 'updated_at']
+        fields = [
+            'id', 'items', 'total_price', 'total_items', 'market_id',
+            'requires_shipping', 'shipping_methods', 'created_at', 'updated_at',
+        ]
     
     @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=3))
     def get_total_price(self, obj):
@@ -194,6 +201,44 @@ class Order2Serializer(serializers.ModelSerializer):
     @extend_schema_field(serializers.IntegerField)
     def get_total_items(self, obj):
         return obj.total_items()
+
+    def _target(self, item):
+        return item.product or item.affiliate
+
+    def get_market_id(self, obj):
+        item = obj.items.select_related('product', 'affiliate').first()
+        target = self._target(item) if item else None
+        return str(target.market_id) if target else None
+
+    def get_requires_shipping(self, obj):
+        for item in obj.items.select_related('product', 'affiliate'):
+            target = self._target(item)
+            if (
+                target.type == Product.GOOD
+                and target.sell_type != Product.PERSON
+                and target.ship_cost_pay_type in (
+                    Product.STORE_SHIPPING,
+                    Product.CUSTOMER,
+                )
+            ):
+                return True
+        return False
+
+    def get_shipping_methods(self, obj):
+        market_id = self.get_market_id(obj)
+        if not market_id or not self.get_requires_shipping(obj):
+            return []
+        return [
+            {
+                'id': str(method.id),
+                'name': method.name,
+                'price': method.price,
+            }
+            for method in MarketShippingMethod.objects.filter(
+                market_id=market_id,
+                is_active=True,
+            ).order_by('created_at')
+        ]
     
 
 class OrderCheckOutSerializer(serializers.ModelSerializer):
@@ -203,6 +248,12 @@ class OrderCheckOutSerializer(serializers.ModelSerializer):
         max_length=16,
         write_only=True,
     )
+    shipping_method = serializers.PrimaryKeyRelatedField(
+        queryset=MarketShippingMethod.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+        write_only=True,
+    )
 
     class Meta:
         model = Order
@@ -210,6 +261,7 @@ class OrderCheckOutSerializer(serializers.ModelSerializer):
             'description', 
             'type',
             'discount_code',
+            'shipping_method',
         ]
 
 class OrderItemSerializer(serializers.ModelSerializer):
@@ -292,6 +344,8 @@ class OrderSerializer(serializers.ModelSerializer):
             'subtotal_amount',
             'discount_amount',
             'discount_code_snapshot',
+            'shipping_method_name_snapshot',
+            'shipping_amount',
             'inventory_status',
             'items'
         ]
@@ -310,18 +364,26 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     items = OrderItemCreateSerializer(many=True)
     description = serializers.CharField(required=False)
     type = serializers.ChoiceField(choices=['online', 'cash'])
+    shipping_method = serializers.PrimaryKeyRelatedField(
+        queryset=MarketShippingMethod.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+        write_only=True,
+    )
 
     class Meta:
         model = Order
         fields = [
             'description', 
             'type',
-            'items'
+            'items',
+            'shipping_method',
         ]
 
     @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop('items')
+        shipping_method = validated_data.pop('shipping_method', None)
         order = Order.objects.create(status=Order.DRAFT, **validated_data)
         for item_data in items_data:
             OrderItem.objects.create(
@@ -330,7 +392,10 @@ class OrderCreateSerializer(serializers.ModelSerializer):
                 affiliate=item_data.get('affiliate'),
                 quantity=item_data['quantity'], 
             )
-        snapshot_order(order)
+        snapshot_order(
+            order,
+            shipping_method_id=shipping_method.id if shipping_method else None,
+        )
         order.status = Order.PENDING
         order.save(update_fields=['status', 'updated_at'])
         return order

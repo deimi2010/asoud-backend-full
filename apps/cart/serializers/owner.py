@@ -59,6 +59,11 @@ class OrderSerializer(serializers.ModelSerializer):
             'total',
             'status',
             'owner_description',
+            'subtotal_amount',
+            'discount_amount',
+            'shipping_method_name_snapshot',
+            'shipping_amount',
+            'payable_amount',
             'items'
         ]
         read_only_fields = [

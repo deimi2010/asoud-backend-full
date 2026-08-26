@@ -11,6 +11,7 @@ from apps.market.models import (
     MarketSlider,
     MarketTheme,
     MarketGatewayConnection,
+    MarketShippingMethod,
 )
 
 
@@ -167,6 +168,24 @@ class MarketGatewayConnectionSerializer(serializers.ModelSerializer):
         return bool(obj.user_code)
 
 
+class MarketShippingMethodSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MarketShippingMethod
+        fields = ('id', 'name', 'price', 'is_active', 'created_at')
+        read_only_fields = ('id', 'created_at')
+
+    def validate_name(self, value):
+        value = ' '.join(value.split())
+        if not value:
+            raise serializers.ValidationError('Shipping method name is required.')
+        return value
+
+    def validate_price(self, value):
+        if value < 0:
+            raise serializers.ValidationError('Shipping price cannot be negative.')
+        return value
+
+
 class MarketListSerializer(serializers.ModelSerializer):
     created_at = serializers.SerializerMethodField()
     inactive_url = serializers.SerializerMethodField()
@@ -182,6 +201,8 @@ class MarketListSerializer(serializers.ModelSerializer):
             'id',
             'business_id',
             'name',
+            'slogan',
+            'description',
             'sub_category',
             'sub_category_title',
             'status',
@@ -235,3 +256,12 @@ class MarketSliderListSerializer(serializers.ModelSerializer):
             'image',
             'url',
         ]
+
+
+class MarketSliderWriteSerializer(serializers.Serializer):
+    slider_img = serializers.ImageField(required=False)
+    url = serializers.URLField(
+        required=False,
+        allow_blank=True,
+        max_length=500,
+    )

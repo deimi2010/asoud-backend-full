@@ -1,5 +1,6 @@
 from django.utils.translation import gettext_lazy as _
 from django.contrib.contenttypes.fields import GenericRelation
+from django.core.validators import MaxValueValidator, MinValueValidator
 
 from apps.base.models import models, BaseModel
 from apps.users.models import User
@@ -39,6 +40,12 @@ class ProductTheme(BaseModel):
         default=0,
         verbose_name=_('Order'),
     )
+    client_request_id = models.UUIDField(
+        null=True,
+        blank=True,
+        unique=True,
+        editable=False,
+    )
 
     class Meta:
         db_table = 'product_theme'
@@ -61,11 +68,15 @@ class Product(BaseModel):
     MARKET = "market"
     CUSTOMER = "customer"
     FREE = "free"
+    NO_SHIPPING = "none"
+    STORE_SHIPPING = "store"
 
     SHIP_COST_PAY_TYPE_CHOICES = (
         (MARKET, _("Market")),
         (CUSTOMER, _("Customer")),
         (FREE, _("Free")),
+        (NO_SHIPPING, _("No shipping")),
+        (STORE_SHIPPING, _("Use store shipping methods")),
     )
 
     DRAFT = "draft"
@@ -274,7 +285,7 @@ class Product(BaseModel):
 
     theme = models.ForeignKey(
         ProductTheme,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         blank=True,
         null=True,
         related_name='products',
@@ -300,6 +311,16 @@ class Product(BaseModel):
             models.Index(fields=['market', 'created_at'], name='idx_product_market_created'),
             models.Index(fields=['tag'], name='idx_product_tag'),
             models.Index(fields=['is_marketer'], name='idx_product_marketer'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['theme', 'theme_index'],
+                condition=models.Q(
+                    theme__isnull=False,
+                    theme_index__isnull=False,
+                ),
+                name='uniq_product_theme_slot',
+            ),
         ]
 
     def __str__(self):
@@ -370,6 +391,14 @@ class ProductImage(BaseModel):
 
 
 class ProductDiscount(BaseModel):
+    PERCENT = 'percent'
+    TIMED = 'timed'
+    GROUP = 'group'
+    TYPE_CHOICES = (
+        (PERCENT, _('Percentage')),
+        (TIMED, _('Timed')),
+        (GROUP, _('Group')),
+    )
     TOP_LEFT = "top_left"
     TOP_RIGHT = "top_right"
     BOTTOM_LEFT = "bottom_left"
@@ -385,6 +414,7 @@ class ProductDiscount(BaseModel):
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
+        related_name='automatic_discounts',
         verbose_name=_('Product'),
     )
 
@@ -404,6 +434,13 @@ class ProductDiscount(BaseModel):
 
     percentage = models.PositiveSmallIntegerField(
         verbose_name=_('Percentage'),
+        validators=[MinValueValidator(1), MaxValueValidator(99)],
+    )
+
+    discount_type = models.CharField(
+        max_length=12,
+        choices=TYPE_CHOICES,
+        default=PERCENT,
     )
 
     duration = models.PositiveSmallIntegerField(
@@ -412,6 +449,12 @@ class ProductDiscount(BaseModel):
         verbose_name=_('Duration'),
     )
 
+    expiry = models.DateTimeField(blank=True, null=True)
+    limitation = models.PositiveSmallIntegerField(default=0)
+    consumed = models.PositiveSmallIntegerField(default=0)
+    reserved = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
     class Meta:
         db_table = 'product_discount'
         verbose_name = _('Product discount')
@@ -419,3 +462,81 @@ class ProductDiscount(BaseModel):
 
     def __str__(self):
         return f'{self.percentage}'
+
+
+class ProductLike(BaseModel):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='product_likes',
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name='liked_by',
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'product_like'
+        constraints = [
+            models.UniqueConstraint(
+                fields=('user', 'product'),
+                name='uniq_product_like_user_product',
+            ),
+        ]
+
+
+class ProductBookmark(BaseModel):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='product_bookmarks',
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name='bookmarked_by',
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'product_bookmark'
+        constraints = [
+            models.UniqueConstraint(
+                fields=('user', 'product'),
+                name='uniq_product_bookmark_user_product',
+            ),
+        ]
+
+
+class ProductReport(BaseModel):
+    DRAFT = 'draft'
+    IN_PROGRESS = 'in_progress'
+    COMPLETED = 'completed'
+    STATUS_CHOICES = (
+        (DRAFT, _('Draft')),
+        (IN_PROGRESS, _('In progress')),
+        (COMPLETED, _('Completed')),
+    )
+
+    creator = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='product_reports',
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name='reports',
+    )
+    description = models.TextField()
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=DRAFT,
+    )
+
+    class Meta:
+        db_table = 'product_report'
