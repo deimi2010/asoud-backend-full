@@ -370,7 +370,8 @@ class ChatMessageCreateSerializer(serializers.ModelSerializer):
                 'image/jpeg', 'image/png', 'image/gif', 'image/webp',
                 'application/pdf', 'text/plain', 'application/msword',
                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                'audio/mpeg', 'audio/wav', 'video/mp4', 'video/avi'
+                'audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/x-m4a',
+                'video/mp4', 'video/avi', 'video/quicktime'
             ]
             
             if mime_type not in allowed_types:

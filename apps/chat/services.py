@@ -18,7 +18,7 @@ from asgiref.sync import async_to_sync
 
 from .models import (
     ChatRoom, ChatParticipant, ChatMembershipEvent, ChatMessage, ChatMessageRead,
-    SupportTicket, ChatAnalytics
+    SupportTicket, ChatAnalytics, chat_user_display_name
 )
 
 User = get_user_model()
@@ -46,7 +46,8 @@ class ChatService:
             'image/jpeg', 'image/png', 'image/gif', 'image/webp',
             'application/pdf', 'text/plain', 'application/msword',
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'audio/mpeg', 'audio/wav', 'video/mp4', 'video/avi'
+            'audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/x-m4a',
+            'video/mp4', 'video/avi', 'video/quicktime'
         ])
     
     def create_chat_room(
@@ -193,6 +194,8 @@ class ChatService:
                 raise ValidationError("Chat room is not active")
             if reply_to and reply_to.chat_room_id != chat_room.id:
                 raise ValidationError("Reply target must belong to the same chat room")
+            if reply_to and reply_to.is_deleted:
+                raise ValidationError("Deleted messages cannot be used as reply targets")
             product = kwargs.get('product')
             if product and (
                 not chat_room.market_id or product.market_id != chat_room.market_id
@@ -240,6 +243,7 @@ class ChatService:
                 self._update_message_analytics(chat_room)
                 
                 logger.info(f"Message {message.id} sent to room {chat_room.id}")
+                transaction.on_commit(lambda: self._notify_new_message(message))
                 return message
                 
         except Exception as e:
@@ -659,6 +663,59 @@ class ChatService:
         # If all participants have read, mark as read
         if read_count >= participant_count - 1:  # -1 to exclude sender
             message.mark_as_read()
+
+    def _notify_new_message(self, message: ChatMessage):
+        """Deliver foreground and background notifications to other participants."""
+        from apps.notification.models import NotificationTemplate
+        from apps.notification.services import NotificationService
+
+        recipients = message.chat_room.participants.exclude(pk=message.sender_id)
+        title = message.chat_room.name or chat_user_display_name(message.sender)
+        body = message.content.strip() or {
+            ChatMessage.IMAGE: 'تصویر جدید',
+            ChatMessage.AUDIO: 'پیام صوتی جدید',
+            ChatMessage.VIDEO: 'ویدیوی جدید',
+            ChatMessage.FILE: 'فایل جدید',
+            ChatMessage.LOCATION: 'موقعیت مکانی جدید',
+        }.get(message.message_type, 'پیام جدید')
+        data = {
+            'route': 'chat',
+            'room_id': str(message.chat_room_id),
+            'message_id': str(message.id),
+        }
+        push_service = (
+            NotificationService()
+            if getattr(settings, 'FIREBASE_ENABLED', False)
+            else None
+        )
+        channel_layer = get_channel_layer()
+        for recipient in recipients:
+            try:
+                async_to_sync(channel_layer.group_send)(
+                    f'user_{recipient.pk}',
+                    {
+                        'type': 'send_notification',
+                        'data': {
+                            'type': NotificationTemplate.NEW_MESSAGE,
+                            'title': title,
+                            'body': body[:180],
+                            'data': data,
+                            'timestamp': timezone.now().isoformat(),
+                        },
+                    },
+                )
+            except Exception as exc:
+                logger.warning('Foreground chat notification unavailable: %s', exc)
+            if push_service is not None:
+                push_service.send_notification(
+                    user=recipient,
+                    notification_type=NotificationTemplate.NEW_MESSAGE,
+                    title=title,
+                    body=body[:180],
+                    channel=NotificationTemplate.PUSH,
+                    data=data,
+                    priority='high',
+                )
     
     def _update_message_analytics(self, chat_room: ChatRoom):
         """Update message analytics for a chat room"""

@@ -5,11 +5,13 @@ Real-time chat messaging with file sharing and support tickets
 
 import json
 import logging
+import os
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.core.files.base import ContentFile
+from django.core.cache import cache
 import base64
 import uuid
 
@@ -61,6 +63,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             
             # Accept connection
             await self.accept()
+            became_online = await self.set_presence(True)
             
             # Send connection confirmation
             await self.send(text_data=json.dumps({
@@ -70,20 +73,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'user_id': self.user.id,
                 'timestamp': timezone.now().isoformat()
             }))
+            await self.send_presence_snapshot(room)
             
             # Send recent messages
             await self.send_recent_messages(room)
             
             # Notify other participants about user joining
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    'type': 'user_joined',
-                    'user_id': self.user.id,
-                    'username': chat_user_display_name(self.user),
-                    'timestamp': timezone.now().isoformat()
-                }
-            )
+            if became_online:
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        'type': 'user_joined',
+                        'user_id': self.user.id,
+                        'username': chat_user_display_name(self.user),
+                        'timestamp': timezone.now().isoformat()
+                    }
+                )
             
             logger.info("User %s connected to chat room %s", self.user.pk, self.room_id)
             
@@ -94,17 +99,21 @@ class ChatConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection"""
         try:
+            became_offline = False
+            if hasattr(self, 'user') and self.user.is_authenticated:
+                became_offline = await self.set_presence(False)
             if hasattr(self, 'room_group_name'):
                 # Notify other participants about user leaving
-                await self.channel_layer.group_send(
-                    self.room_group_name,
-                    {
-                        'type': 'user_left',
-                        'user_id': self.user.id,
-                        'username': chat_user_display_name(self.user),
-                        'timestamp': timezone.now().isoformat()
-                    }
-                )
+                if became_offline:
+                    await self.channel_layer.group_send(
+                        self.room_group_name,
+                        {
+                            'type': 'user_left',
+                            'user_id': self.user.id,
+                            'username': chat_user_display_name(self.user),
+                            'timestamp': timezone.now().isoformat()
+                        }
+                    )
                 
                 # Leave room group
                 await self.channel_layer.group_discard(
@@ -158,6 +167,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             product_id = data.get('product_id')
             client_id = data.get('client_id')
             file_data = data.get('file_data')
+            latitude = data.get('latitude')
+            longitude = data.get('longitude')
             
             if not content and not file_data:
                 return
@@ -172,6 +183,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'content': content,
                 'message_type': message_type,
                 'client_id': client_id,
+                'latitude': latitude,
+                'longitude': longitude,
             }
             
             # Handle file upload
@@ -179,6 +192,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 file_info = await self.process_file_upload(file_data)
                 if file_info:
                     message_data.update(file_info)
+                else:
+                    await self.send(text_data=json.dumps({
+                        'type': 'message_error',
+                        'client_id': client_id,
+                        'code': 'invalid_file',
+                    }))
+                    return
             
             # Handle reply
             if reply_to_id:
@@ -191,6 +211,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 if not product:
                     await self.send(text_data=json.dumps({
                         'type': 'message_error',
+                        'client_id': client_id,
                         'code': 'product_not_found',
                     }))
                     return
@@ -198,6 +219,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
             
             # Create message
             message = await self.create_message(room, message_data)
+            if not message:
+                await self.send(text_data=json.dumps({
+                    'type': 'message_error',
+                    'client_id': client_id,
+                    'code': 'message_rejected',
+                }))
+                return
             
             if message:
                 product_payload = await self.get_product_payload(message.product_id)
@@ -225,6 +253,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                             'sent_at': message.sent_at.isoformat(),
                             'status': message.status,
                             'product': product_payload,
+                            'latitude': str(message.latitude) if message.latitude is not None else None,
+                            'longitude': str(message.longitude) if message.longitude is not None else None,
                         }
                     }
                 )
@@ -286,6 +316,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
     async def handle_ping(self):
         """Handle ping message"""
         try:
+            await self.refresh_presence()
             await self.send(text_data=json.dumps({
                 'type': 'pong',
                 'timestamp': timezone.now().isoformat()
@@ -311,6 +342,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
             'message_id': event['message_id'],
             'reader_id': event['reader_id'],
         }))
+
+    async def message_event(self, event):
+        """Broadcast message edits and soft deletes to connected clients."""
+        payload = {'type': event['event_type']}
+        payload.update({
+            key: value for key, value in event.items()
+            if key not in {'type', 'event_type'}
+        })
+        await self.send(text_data=json.dumps(payload))
     
     async def typing(self, event):
         """Send typing indicator to WebSocket"""
@@ -386,6 +426,57 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return ChatRoom.objects.get(id=room_id)
         except ChatRoom.DoesNotExist:
             return None
+
+    @database_sync_to_async
+    def set_presence(self, online):
+        key = f'chat:presence:{self.room_id}:{self.user.pk}'
+        last_seen_key = f'chat:last_seen:{self.room_id}:{self.user.pk}'
+        try:
+            if online:
+                if cache.add(key, 1, timeout=120):
+                    return True
+                cache.incr(key)
+                cache.touch(key, timeout=120)
+                return False
+            connections = cache.get(key, 0)
+            if connections <= 1:
+                cache.delete(key)
+                cache.set(last_seen_key, timezone.now().isoformat(), timeout=2592000)
+                return True
+            cache.decr(key)
+            cache.touch(key, timeout=120)
+            return False
+        except Exception:
+            logger.warning('Presence cache unavailable')
+            return True
+
+    @database_sync_to_async
+    def refresh_presence(self):
+        key = f'chat:presence:{self.room_id}:{self.user.pk}'
+        try:
+            cache.touch(key, timeout=120)
+        except Exception:
+            logger.warning('Presence cache unavailable')
+
+    async def send_presence_snapshot(self, room):
+        snapshot = await self.get_presence_snapshot(room)
+        await self.send(text_data=json.dumps({
+            'type': 'presence_snapshot',
+            **snapshot,
+        }))
+
+    @database_sync_to_async
+    def get_presence_snapshot(self, room):
+        other_id = room.participants.exclude(pk=self.user.pk).values_list('pk', flat=True).first()
+        if other_id is None:
+            return {'online': False, 'last_seen': None}
+        try:
+            return {
+                'online': bool(cache.get(f'chat:presence:{self.room_id}:{other_id}')),
+                'last_seen': cache.get(f'chat:last_seen:{self.room_id}:{other_id}'),
+            }
+        except Exception:
+            return {'online': False, 'last_seen': None}
     
     @database_sync_to_async
     def is_participant(self, room, user):
@@ -498,20 +589,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 return None
             
             # Decode base64 data
-            file_content = base64.b64decode(file_data['content'])
+            file_content = base64.b64decode(file_data['content'], validate=True)
             if len(file_content) > 10 * 1024 * 1024:
                 return None
-            file_name = file_data.get('name', f"file_{uuid.uuid4().hex}")
-            file_type = file_data.get('type', 'application/octet-stream')
+            file_name = os.path.basename(
+                file_data.get('name') or f"file_{uuid.uuid4().hex}"
+            )[:255]
             
             # Create file object
             file_obj = ContentFile(file_content, name=file_name)
             
             return {
                 'file': file_obj,
-                'file_name': file_name,
-                'file_size': len(file_content),
-                'file_type': file_type,
             }
             
         except Exception as e:

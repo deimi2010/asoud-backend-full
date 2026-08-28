@@ -4,6 +4,8 @@ API views for chat rooms, messages, and support tickets
 """
 
 import logging
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -13,7 +15,7 @@ from apps.core.base_views import BaseAPIView
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils.decorators import method_decorator
@@ -415,6 +417,16 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
     """
     serializer_class = ChatMessageSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    @staticmethod
+    def _broadcast(room_id, event_type, **payload):
+        try:
+            async_to_sync(get_channel_layer().group_send)(
+                f'chat_{room_id}',
+                {'type': 'message_event', 'event_type': event_type, **payload},
+            )
+        except Exception as exc:
+            logger.warning('Chat event broadcast unavailable: %s', exc)
     
     def get_queryset(self):
         """Get messages for current user's chat rooms"""
@@ -474,6 +486,8 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
                 reply_to=reply_to,
                 product=product,
                 client_id=serializer.validated_data.get('client_id'),
+                latitude=serializer.validated_data.get('latitude'),
+                longitude=serializer.validated_data.get('longitude'),
             )
             
             serializer.instance = message
@@ -538,9 +552,21 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
                     {'error': 'You can only edit your own messages'},
                     status=status.HTTP_403_FORBIDDEN
                 )
+            if message.is_deleted or message.message_type != ChatMessage.TEXT:
+                return Response(
+                    {'error': 'Only active text messages can be edited'},
+                    status=status.HTTP_409_CONFLICT,
+                )
             
             # Edit message
             message.edit_message(new_content)
+            self._broadcast(
+                message.chat_room_id,
+                'message_edited',
+                message_id=str(message.id),
+                content=message.content,
+                edited_at=message.edited_at.isoformat(),
+            )
             
             return Response({
                 'message': 'Message edited successfully',
@@ -571,6 +597,11 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
             
             # Delete message
             message.delete_message()
+            self._broadcast(
+                message.chat_room_id,
+                'message_deleted',
+                message_id=str(message.id),
+            )
             
             return Response({
                 'message': 'Message deleted successfully'
@@ -583,6 +614,44 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
+    @action(detail=False, methods=['get'])
+    def unread_summary(self, request):
+        rooms = ChatRoom.objects.filter(participants=request.user)
+        unread = ChatMessage.objects.filter(
+            chat_room__in=rooms,
+            is_deleted=False,
+        ).exclude(sender=request.user).exclude(read_by__user=request.user)
+        return Response({
+            'total': unread.count(),
+            'rooms': list(
+                unread.values('chat_room_id')
+                .annotate(count=Count('id'))
+                .values('chat_room_id', 'count')
+            ),
+        })
+
+    @action(detail=False, methods=['post'])
+    def mark_room_read(self, request):
+        room_id = request.data.get('room_id')
+        try:
+            room = ChatRoom.objects.get(pk=room_id, participants=request.user)
+        except (ChatRoom.DoesNotExist, ValueError, TypeError):
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        unread = ChatMessage.objects.filter(
+            chat_room=room,
+            is_deleted=False,
+        ).exclude(sender=request.user).exclude(read_by__user=request.user)
+        marked = unread.count()
+        for message in unread:
+            if ChatService().mark_message_as_read(message, request.user):
+                self._broadcast(
+                    room.id,
+                    'message_read',
+                    message_id=str(message.id),
+                    reader_id=request.user.pk,
+                )
+        return Response({'marked': marked})
+
     @action(detail=False, methods=['get'])
     def room_messages(self, request):
         """Get messages for a specific chat room"""

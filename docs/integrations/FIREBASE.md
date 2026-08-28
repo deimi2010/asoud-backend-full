@@ -7,8 +7,8 @@ commissions, and notification history.
 ## Backend features
 
 - FCM push delivery through `firebase-admin`.
-- Per-user device registration at `POST /api/v1/devices/`.
-- Device removal at `DELETE /api/v1/devices/{id}/`.
+- Per-user device registration at `POST /api/v1/notification/devices/`.
+- Device removal at `DELETE /api/v1/notification/devices/{id}/`.
 - Automatic deactivation of registrations rejected as unregistered by FCM.
 - Optional Firebase App Check enforcement for `/api/v1/`.
 
@@ -21,7 +21,7 @@ be verified in staging.
 ## Client contract
 
 The Flutter client must initialize Firebase, request notification permission,
-upload its current FCM registration to `/api/v1/devices/`, refresh that registration
+upload its current FCM registration to `/api/v1/notification/devices/`, refresh that registration
 when Firebase rotates it, and deactivate it on logout. It should also initialize:
 
 - Crashlytics for uncaught Flutter/platform failures;

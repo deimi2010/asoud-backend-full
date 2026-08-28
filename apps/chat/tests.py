@@ -3,14 +3,17 @@ Comprehensive Tests for Chat and Support System
 Unit and integration tests for chat rooms, messages, and support tickets
 """
 
-from django.test import TestCase, TransactionTestCase
+import base64
+import tempfile
+
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
 from asgiref.sync import async_to_sync
 from channels.testing import WebsocketCommunicator
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from decimal import Decimal
 
 from apps.category.models import Category, Group, SubCategory
@@ -715,6 +718,169 @@ class MarketChatAPITests(APITestCase):
         self.assertTrue(response.data['has_previous'])
         self.assertEqual(len(response.data['results']), 2)
 
+    def test_unread_summary_and_mark_room_read(self):
+        room_id = self.start_chat().data['room']['id']
+        room = ChatRoom.objects.get(pk=room_id)
+        ChatMessage.objects.create(
+            chat_room=room,
+            sender=self.owner,
+            content='Unread message',
+        )
+
+        summary = self.client.get('/api/v1/chat/messages/unread_summary/')
+        self.assertEqual(summary.status_code, status.HTTP_200_OK)
+        self.assertEqual(summary.data['total'], 1)
+
+        with patch('apps.chat.views.ChatMessageViewSet._broadcast') as broadcast:
+            marked = self.client.post(
+                '/api/v1/chat/messages/mark_room_read/',
+                {'room_id': room_id},
+                format='json',
+            )
+            self.assertEqual(broadcast.call_args.args[1], 'message_read')
+        self.assertEqual(marked.status_code, status.HTTP_200_OK)
+        self.assertEqual(marked.data['marked'], 1)
+        self.assertEqual(
+            self.client.get('/api/v1/chat/messages/unread_summary/').data['total'],
+            0,
+        )
+
+    def test_sender_can_edit_and_soft_delete_message(self):
+        room_id = self.start_chat().data['room']['id']
+        created = self.client.post(
+            '/api/v1/chat/messages/',
+            {
+                'chat_room_id': room_id,
+                'content': 'Original message',
+                'message_type': ChatMessage.TEXT,
+            },
+            format='json',
+        )
+        message_id = created.data['id']
+
+        self.client.force_authenticate(self.owner)
+        forbidden = self.client.post(
+            f'/api/v1/chat/messages/{message_id}/edit/',
+            {'content': 'Owner rewrite'},
+            format='json',
+        )
+        self.assertEqual(forbidden.status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.customer)
+
+        with patch('apps.chat.views.ChatMessageViewSet._broadcast') as broadcast:
+            edited = self.client.post(
+                f'/api/v1/chat/messages/{message_id}/edit/',
+                {'content': 'Edited message'},
+                format='json',
+            )
+            self.assertEqual(broadcast.call_args.args[1], 'message_edited')
+        self.assertEqual(edited.status_code, status.HTTP_200_OK)
+        message = ChatMessage.objects.get(pk=message_id)
+        self.assertEqual(message.content, 'Edited message')
+        self.assertTrue(message.is_edited)
+
+        with patch('apps.chat.views.ChatMessageViewSet._broadcast') as broadcast:
+            deleted = self.client.post(
+                f'/api/v1/chat/messages/{message_id}/delete/',
+                {},
+                format='json',
+            )
+            self.assertEqual(broadcast.call_args.args[1], 'message_deleted')
+        self.assertEqual(deleted.status_code, status.HTTP_200_OK)
+        message.refresh_from_db()
+        self.assertTrue(message.is_deleted)
+
+    def test_room_search_returns_only_matching_messages(self):
+        room_id = self.start_chat().data['room']['id']
+        room = ChatRoom.objects.get(pk=room_id)
+        ChatMessage.objects.create(
+            chat_room=room,
+            sender=self.customer,
+            content='Unique searchable phrase',
+        )
+        ChatMessage.objects.create(
+            chat_room=room,
+            sender=self.customer,
+            content='Different message',
+        )
+
+        response = self.client.get(
+            '/api/v1/chat/search/',
+            {'room_id': room_id, 'q': 'searchable'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.data['data']
+        self.assertEqual(payload['count'], 1)
+        self.assertEqual(
+            payload['results'][0]['content'],
+            'Unique searchable phrase',
+        )
+
+    def test_reply_and_location_metadata_are_persisted(self):
+        room_id = self.start_chat().data['room']['id']
+        room = ChatRoom.objects.get(pk=room_id)
+        parent = ChatMessage.objects.create(
+            chat_room=room,
+            sender=self.owner,
+            content='Parent message',
+        )
+
+        reply = self.client.post(
+            '/api/v1/chat/messages/',
+            {
+                'chat_room_id': room_id,
+                'content': 'Reply message',
+                'message_type': ChatMessage.TEXT,
+                'reply_to': str(parent.id),
+            },
+            format='json',
+        )
+        self.assertEqual(reply.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            ChatMessage.objects.get(pk=reply.data['id']).reply_to_id,
+            parent.id,
+        )
+
+        location = self.client.post(
+            '/api/v1/chat/messages/',
+            {
+                'chat_room_id': room_id,
+                'content': 'Current location',
+                'message_type': ChatMessage.LOCATION,
+                'latitude': '35.7219',
+                'longitude': '51.3347',
+            },
+            format='json',
+        )
+        self.assertEqual(location.status_code, status.HTTP_201_CREATED)
+        stored = ChatMessage.objects.get(pk=location.data['id'])
+        self.assertEqual(str(stored.latitude), '35.721900')
+        self.assertEqual(str(stored.longitude), '51.334700')
+
+    @override_settings(FIREBASE_ENABLED=True)
+    @patch('apps.chat.services.get_channel_layer')
+    @patch('apps.notification.services.NotificationService.send_notification')
+    def test_new_message_dispatches_foreground_and_push_notifications(
+        self, send, get_channel_layer,
+    ):
+        send.return_value = True
+        get_channel_layer.return_value.group_send = AsyncMock()
+        room_id = self.start_chat().data['room']['id']
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                '/api/v1/chat/messages/',
+                {
+                    'chat_room_id': room_id,
+                    'content': 'New message',
+                    'message_type': ChatMessage.TEXT,
+                },
+                format='json',
+            )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(send.call_args.kwargs['channel'], 'push')
+        get_channel_layer.return_value.group_send.assert_awaited_once()
+
 
 class ChatWebSocketTests(TransactionTestCase):
     """Test cases for WebSocket functionality"""
@@ -798,6 +964,163 @@ class ChatWebSocketTests(TransactionTestCase):
                 chat_room=self.room,
                 sender=self.user1,
                 content='Socket message',
+            ).exists()
+        )
+
+    def test_presence_and_typing_are_realtime_for_other_participant(self):
+        async def scenario():
+            payloads = [
+                {'user_id': str(self.user1.pk), 'scope': 'chat'},
+                {'user_id': str(self.user2.pk), 'scope': 'chat'},
+                {'user_id': str(self.user1.pk), 'scope': 'chat'},
+            ]
+            with patch(
+                'apps.core.ws_auth.WebSocketTicketStore.consume',
+                side_effect=payloads,
+            ):
+                first = WebsocketCommunicator(
+                    application,
+                    f'/ws/chat/{self.room.id}/?ticket=first-ticket',
+                    headers=[(b'host', b'localhost'), (b'origin', b'http://localhost')],
+                )
+                second = WebsocketCommunicator(
+                    application,
+                    f'/ws/chat/{self.room.id}/?ticket=second-ticket',
+                    headers=[(b'host', b'localhost'), (b'origin', b'http://localhost')],
+                )
+                another_device = WebsocketCommunicator(
+                    application,
+                    f'/ws/chat/{self.room.id}/?ticket=third-ticket',
+                    headers=[(b'host', b'localhost'), (b'origin', b'http://localhost')],
+                )
+                self.assertTrue((await first.connect())[0])
+                self.assertEqual(
+                    (await first.receive_json_from(timeout=2))['type'],
+                    'connection_established',
+                )
+                self.assertTrue((await second.connect())[0])
+                self.assertEqual(
+                    (await second.receive_json_from(timeout=2))['type'],
+                    'connection_established',
+                )
+                presence = await second.receive_json_from(timeout=2)
+                self.assertEqual(presence['type'], 'presence_snapshot')
+                self.assertTrue(presence['online'])
+                self.assertTrue((await another_device.connect())[0])
+                self.assertEqual(
+                    (await another_device.receive_json_from(timeout=2))['type'],
+                    'connection_established',
+                )
+
+                await first.send_json_to({'type': 'typing'})
+                typing = None
+                for _ in range(5):
+                    frame = await second.receive_json_from(timeout=2)
+                    if frame.get('type') == 'typing':
+                        typing = frame
+                        break
+                self.assertIsNotNone(typing)
+                self.assertEqual(str(typing['user_id']), str(self.user1.pk))
+                await first.disconnect()
+                self.assertTrue(await second.receive_nothing(timeout=.2))
+                await another_device.disconnect()
+                left = await second.receive_json_from(timeout=2)
+                self.assertEqual(left['type'], 'user_left')
+                self.assertEqual(str(left['user_id']), str(self.user1.pk))
+                await second.disconnect()
+
+        async_to_sync(scenario)()
+
+    def test_websocket_file_upload_is_persisted_and_echoed(self):
+        async def scenario():
+            payload = {'user_id': str(self.user1.pk), 'scope': 'chat'}
+            with patch(
+                'apps.core.ws_auth.WebSocketTicketStore.consume',
+                return_value=payload,
+            ):
+                communicator = WebsocketCommunicator(
+                    application,
+                    f'/ws/chat/{self.room.id}/?ticket=file-ticket',
+                    headers=[(b'host', b'localhost'), (b'origin', b'http://localhost')],
+                )
+                self.assertTrue((await communicator.connect())[0])
+                await communicator.receive_json_from(timeout=2)
+                await communicator.send_json_to({
+                    'type': 'chat_message',
+                    'client_id': '4d5d2f18-91fc-4d92-b23f-8502f06ba937',
+                    'content': 'note.txt',
+                    'message_type': 'file',
+                    'file_data': {
+                        'content': base64.b64encode(b'chat attachment').decode(),
+                        'name': 'note.txt',
+                        'type': 'text/plain',
+                    },
+                })
+
+                message_frame = None
+                for _ in range(5):
+                    frame = await communicator.receive_json_from(timeout=2)
+                    if frame.get('type') == 'chat_message':
+                        message_frame = frame['message']
+                        break
+                self.assertIsNotNone(message_frame)
+                self.assertEqual(message_frame['file_name'], 'note.txt')
+                self.assertEqual(message_frame['file_type'], 'text/plain')
+                self.assertTrue(message_frame['file_url'])
+                await communicator.disconnect()
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                async_to_sync(scenario)()
+        message = ChatMessage.objects.get(
+            sender=self.user1,
+            client_id='4d5d2f18-91fc-4d92-b23f-8502f06ba937',
+        )
+        self.assertEqual(message.file_size, len(b'chat attachment'))
+
+    def test_invalid_websocket_file_returns_correlated_error(self):
+        async def scenario():
+            payload = {'user_id': str(self.user1.pk), 'scope': 'chat'}
+            with patch(
+                'apps.core.ws_auth.WebSocketTicketStore.consume',
+                return_value=payload,
+            ):
+                communicator = WebsocketCommunicator(
+                    application,
+                    f'/ws/chat/{self.room.id}/?ticket=invalid-file-ticket',
+                    headers=[(b'host', b'localhost'), (b'origin', b'http://localhost')],
+                )
+                self.assertTrue((await communicator.connect())[0])
+                await communicator.receive_json_from(timeout=2)
+                await communicator.send_json_to({
+                    'type': 'chat_message',
+                    'client_id': '4d5d2f18-91fc-4d92-b23f-8502f06ba938',
+                    'content': 'broken.txt',
+                    'message_type': 'file',
+                    'file_data': {
+                        'content': 'not-valid-base64',
+                        'name': 'broken.txt',
+                        'type': 'text/plain',
+                    },
+                })
+                error = None
+                for _ in range(5):
+                    frame = await communicator.receive_json_from(timeout=2)
+                    if frame.get('type') == 'message_error':
+                        error = frame
+                        break
+                self.assertIsNotNone(error)
+                self.assertEqual(error['code'], 'invalid_file')
+                self.assertEqual(
+                    error['client_id'],
+                    '4d5d2f18-91fc-4d92-b23f-8502f06ba938',
+                )
+                await communicator.disconnect()
+
+        async_to_sync(scenario)()
+        self.assertFalse(
+            ChatMessage.objects.filter(
+                client_id='4d5d2f18-91fc-4d92-b23f-8502f06ba938',
             ).exists()
         )
 
