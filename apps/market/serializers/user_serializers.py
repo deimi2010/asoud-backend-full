@@ -100,7 +100,9 @@ class ContactSerializer(serializers.ModelSerializer):
             'first_mobile_number',
             'second_mobile_number',
             'telephone',
+            'fax',
             'email',
+            'website_url',
             'messenger_ids',
         ]
 

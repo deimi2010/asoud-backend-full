@@ -4,7 +4,14 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.category.models import Category, Group, SubCategory
-from apps.market.models import Market
+from apps.market.models import (
+    Market,
+    MarketBookmark,
+    MarketContact,
+    MarketLike,
+    MarketReport,
+    MarketView,
+)
 from apps.product.models import Product, ProductBookmark, ProductLike, ProductReport
 from apps.referral.models import StoreAccess
 from apps.users.models import User
@@ -127,6 +134,81 @@ class PublicProductDetailTests(TestCase):
         second_like = self.client.post(like_url)
         self.client.post(bookmark_url)
         second_bookmark = self.client.post(bookmark_url)
+
+        self.assertFalse(second_like.data['is_liked'])
+        self.assertEqual(second_like.data['likes_count'], 0)
+        self.assertFalse(second_bookmark.data['is_bookmarked'])
+
+
+class PublicMarketInteractionTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user('09125550101', None)
+        self.buyer = User.objects.create_user('09125550102', None)
+        group = Group.objects.create(title='Market interaction group', market_fee=0)
+        category = Category.objects.create(
+            group=group,
+            title='Market interaction category',
+            market_fee=0,
+        )
+        subcategory = SubCategory.objects.create(
+            category=category,
+            title='Market interaction subcategory',
+            market_fee=0,
+        )
+        self.market = Market.objects.create(
+            user=self.owner,
+            type=Market.SHOP,
+            status=Market.PUBLISHED,
+            business_id='MARKET-INTERACTION-1',
+            name='Interaction market',
+            sub_category=subcategory,
+        )
+        MarketContact.objects.create(
+            market=self.market,
+            first_mobile_number='09120000000',
+            telephone='02112345678',
+            fax='02112345679',
+            email='store@example.com',
+            website_url='https://example.com',
+            messenger_ids={'telegram': 'asoud_store'},
+        )
+        StoreAccess.objects.create(user=self.buyer, market=self.market)
+        self.client = APIClient()
+        self.client.force_authenticate(self.buyer)
+
+    def test_market_interactions_are_persisted_and_returned(self):
+        base = f'/api/v1/storefront/markets/{self.market.id}'
+
+        like = self.client.post(f'{base}/like')
+        bookmark = self.client.post(f'{base}/bookmark')
+        report = self.client.post(f'{base}/report', {'description': 'Incorrect store'})
+        detail = self.client.get('/api/v1/storefront/markets', {'id': self.market.id})
+
+        self.assertEqual(like.status_code, 200)
+        self.assertTrue(like.data['is_liked'])
+        self.assertEqual(bookmark.status_code, 200)
+        self.assertTrue(bookmark.data['is_bookmarked'])
+        self.assertEqual(report.status_code, 201)
+        self.assertTrue(MarketLike.objects.get().is_active)
+        self.assertTrue(MarketBookmark.objects.get().is_active)
+        self.assertEqual(MarketReport.objects.get().description, 'Incorrect store')
+        self.assertTrue(MarketView.objects.filter(user=self.buyer, market=self.market).exists())
+        self.assertTrue(detail.data['data']['is_liked'])
+        self.assertTrue(detail.data['data']['is_bookmarked'])
+        self.assertEqual(detail.data['data']['likes_count'], 1)
+        self.assertEqual(detail.data['data']['views_count'], 1)
+        self.assertEqual(
+            detail.data['data']['contact']['website_url'],
+            'https://example.com',
+        )
+        self.assertEqual(detail.data['data']['contact']['fax'], '02112345679')
+
+    def test_market_like_and_bookmark_are_toggles(self):
+        base = f'/api/v1/storefront/markets/{self.market.id}'
+        self.client.post(f'{base}/like')
+        second_like = self.client.post(f'{base}/like')
+        self.client.post(f'{base}/bookmark')
+        second_bookmark = self.client.post(f'{base}/bookmark')
 
         self.assertFalse(second_like.data['is_liked'])
         self.assertEqual(second_like.data['likes_count'], 0)

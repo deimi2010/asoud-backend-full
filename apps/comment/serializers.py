@@ -1,18 +1,42 @@
+from django.core.exceptions import ObjectDoesNotExist
 from django_comments_xtd.models import XtdComment
 from rest_framework import serializers
 
 
 class CommentSerializer(serializers.ModelSerializer):
     user = serializers.SerializerMethodField()
+    user_name = serializers.SerializerMethodField()
+    user_image = serializers.SerializerMethodField()
     children = serializers.SerializerMethodField()
 
     class Meta:
         model = XtdComment
-        fields = ['id', 'user', 'comment', 'submit_date', 'parent_id', 'level', 'children']
+        fields = [
+            'id', 'user', 'user_name', 'user_image', 'comment', 'submit_date',
+            'parent_id', 'level', 'children',
+        ]
         read_only_fields = fields
 
     def get_user(self, obj) -> str | None:
         return str(obj.user_id) if obj.user_id else None
+
+    def get_user_name(self, obj) -> str:
+        if not obj.user:
+            return 'کاربر آسود'
+        full_name = obj.user.get_full_name().strip()
+        return full_name or 'کاربر آسود'
+
+    def get_user_image(self, obj) -> str | None:
+        if not obj.user:
+            return None
+        try:
+            picture = obj.user.userprofile.picture
+        except (AttributeError, ObjectDoesNotExist):
+            return None
+        if not picture:
+            return None
+        request = self.context.get('request')
+        return request.build_absolute_uri(picture.url) if request else picture.url
 
     def get_children(self, obj) -> list[dict]:
         depth = self.context.get('depth', 1)
@@ -36,6 +60,7 @@ class CommentSerializer(serializers.ModelSerializer):
             context={
                 'depth': depth - 1,
                 'children_by_parent': children_by_parent,
+                'request': self.context.get('request'),
             },
         ).data
 

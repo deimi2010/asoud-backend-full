@@ -107,7 +107,9 @@ class CommentDetailView(APIView):
             return Response({'error': 'Comment not found'}, status=status.HTTP_404_NOT_FOUND)
         if not _comment_target_is_public(comment):
             return Response({'error': 'Comment not found'}, status=status.HTTP_404_NOT_FOUND)
-        return Response(CommentSerializer(comment, context={'depth': 1}).data)
+        return Response(
+            CommentSerializer(comment, context={'depth': 1, 'request': request}).data
+        )
 
 
 class ContentCommentsView(APIView):
@@ -131,6 +133,7 @@ class ContentCommentsView(APIView):
         )
         comments = list(
             visible.filter(models.Q(id__in=root_ids) | models.Q(parent_id__in=root_ids))
+            .select_related('user', 'user__userprofile')
             .order_by('submit_date')
         )
         roots = []
@@ -147,6 +150,7 @@ class ContentCommentsView(APIView):
                 context={
                     'depth': 1,
                     'children_by_parent': children_by_parent,
+                    'request': request,
                 },
             ).data
         )
@@ -174,4 +178,6 @@ class CommentUpdateView(APIView):
         serializer.is_valid(raise_exception=True)
         comment.comment = serializer.validated_data['comment']
         comment.save(update_fields=['comment'])
-        return Response(CommentSerializer(comment, context={'depth': 1}).data)
+        return Response(
+            CommentSerializer(comment, context={'depth': 1, 'request': request}).data
+        )

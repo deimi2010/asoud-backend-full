@@ -4,7 +4,7 @@ from drf_spectacular.utils import OpenApiResponse, extend_schema
 from utils.response import ApiResponse
 from apps.core.base_views import BaseDetailView
 
-from apps.market.models import Market
+from apps.market.models import Market, MarketBookmark, MarketLike, MarketReport, MarketView
 from apps.market.serializers.user_serializers import (
     MarketListSerializer,
     MarketDetailSerializer
@@ -22,6 +22,10 @@ from apps.flutter.serializers import (
     ProductLikeActionSerializer,
     ProductBookmarkActionSerializer,
     ProductReportActionSerializer,
+    PublicMarketInteractionSerializer,
+    MarketLikeActionSerializer,
+    MarketBookmarkActionSerializer,
+    MarketReportActionSerializer,
 )
 from apps.advertise.models import Advertisement
 from apps.advertise.serializers import AdvertiseSerializer
@@ -36,7 +40,7 @@ from apps.referral.access import viewable_markets
 
 class MarketDetailView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
-    serializer_class = MarketListSerializer
+    serializer_class = PublicMarketInteractionSerializer
 
     def get(self, request):
         market_id = request.GET.get('id')
@@ -62,7 +66,12 @@ class MarketDetailView(views.APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        serializer = MarketListSerializer(market)
+        if market.user_id != request.user.id and not request.user.is_staff:
+            MarketView.objects.get_or_create(user=request.user, market=market)
+        serializer = PublicMarketInteractionSerializer(
+            market,
+            context={'request': request},
+        )
         AnalyticsRecorder.record_request(
             request,
             AnalyticsEvent.MARKET_VIEW,
@@ -138,6 +147,61 @@ class ProductDetailView(views.APIView):
                 data=serializer.data
             )
         )
+
+
+def _public_market_for_user(user, market_id):
+    return viewable_markets(user).filter(status=Market.PUBLISHED).get(id=market_id)
+
+
+class MarketLikeView(views.APIView):
+    serializer_class = MarketLikeActionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            market = _public_market_for_user(request.user, pk)
+        except Market.DoesNotExist:
+            return Response({'detail': 'Market not found.'}, status=status.HTTP_404_NOT_FOUND)
+        like, created = MarketLike.objects.get_or_create(user=request.user, market=market)
+        like.is_active = True if created else not like.is_active
+        like.save(update_fields=['is_active', 'updated_at'])
+        return Response({
+            'is_liked': like.is_active,
+            'likes_count': market.liked_by.filter(is_active=True).count(),
+        })
+
+
+class MarketBookmarkView(views.APIView):
+    serializer_class = MarketBookmarkActionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            market = _public_market_for_user(request.user, pk)
+        except Market.DoesNotExist:
+            return Response({'detail': 'Market not found.'}, status=status.HTTP_404_NOT_FOUND)
+        bookmark, created = MarketBookmark.objects.get_or_create(
+            user=request.user,
+            market=market,
+        )
+        bookmark.is_active = True if created else not bookmark.is_active
+        bookmark.save(update_fields=['is_active', 'updated_at'])
+        return Response({'is_bookmarked': bookmark.is_active})
+
+
+class MarketReportView(views.APIView):
+    serializer_class = MarketReportActionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            market = _public_market_for_user(request.user, pk)
+        except Market.DoesNotExist:
+            return Response({'detail': 'Market not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = MarketReportActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(creator=request.user, market=market)
+        return Response({'submitted': True}, status=status.HTTP_201_CREATED)
 
 
 def _public_product_for_user(user, product_id):

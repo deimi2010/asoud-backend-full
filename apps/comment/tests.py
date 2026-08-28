@@ -102,7 +102,29 @@ class CommentIntegrityTests(TestCase):
         self.assertEqual(nested.status_code, 400)
         self.assertEqual(len(listing.data), 1)
         self.assertEqual(listing.data[0]['comment'], 'Root')
+        self.assertEqual(listing.data[0]['user_name'], 'کاربر آسود')
+        self.assertIsNone(listing.data[0]['user_image'])
         self.assertEqual(listing.data[0]['children'][0]['comment'], 'Reply')
+
+    def test_market_comments_use_the_same_real_contract(self):
+        self.client.force_authenticate(self.user)
+        created = self.client.post(
+            '/api/v1/user/comment/create/',
+            {
+                'content_type': 'market',
+                'object_id': str(self.market.id),
+                'comment': 'Store comment',
+            },
+            format='json',
+        )
+        listing = self.client.get(
+            f'/api/v1/user/comment/comments/market/{self.market.id}/'
+        )
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(len(listing.data), 1)
+        self.assertEqual(listing.data[0]['comment'], 'Store comment')
 
     def test_create_rejects_unsupported_or_unpublished_target(self):
         self.product.status = Product.DRAFT
