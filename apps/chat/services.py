@@ -4,20 +4,14 @@ Comprehensive chat system with real-time messaging, file sharing, and support ti
 """
 
 import logging
-import time
-import os
 import mimetypes
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from datetime import timedelta
+from typing import Dict, List, Any
 from django.conf import settings
 from django.utils import timezone
-from django.core.cache import cache
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Q, Count, Avg, Max
-from django.core.files.storage import default_storage
-from django.core.files.base import ContentFile
-from django.utils.translation import gettext_lazy as _
+from django.db.models import Q, Count, Avg
 from django.core.exceptions import ValidationError
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -195,6 +189,27 @@ class ChatService:
             # Check if user is participant
             if not chat_room.is_participant(sender):
                 raise ValidationError("User is not a participant in this chat room")
+            if chat_room.status != ChatRoom.ACTIVE:
+                raise ValidationError("Chat room is not active")
+            if reply_to and reply_to.chat_room_id != chat_room.id:
+                raise ValidationError("Reply target must belong to the same chat room")
+            product = kwargs.get('product')
+            if product and (
+                not chat_room.market_id or product.market_id != chat_room.market_id
+            ):
+                raise ValidationError("Product must belong to the chat market")
+            if not content.strip() and not file and product is None:
+                raise ValidationError("Message content is required")
+            client_id = kwargs.get('client_id')
+            if client_id:
+                existing = ChatMessage.objects.filter(
+                    sender=sender,
+                    client_id=client_id,
+                ).first()
+                if existing:
+                    if existing.chat_room_id != chat_room.id:
+                        raise ValidationError("Client message ID belongs to another room")
+                    return existing
             
             # Validate file if provided
             file_data = None
@@ -265,7 +280,9 @@ class ChatService:
             
             # Get messages
             messages = ChatMessage.objects.filter(query).select_related(
-                'sender', 'reply_to', 'reply_to__sender'
+                'sender', 'reply_to', 'reply_to__sender', 'product'
+            ).prefetch_related(
+                'product__images',
             ).order_by('-sent_at')[offset:offset + limit]
             
             # Mark messages as delivered for this user

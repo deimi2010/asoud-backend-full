@@ -6,10 +6,8 @@ Serializers for chat rooms, messages, and support tickets
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 from django.conf import settings
 from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 import base64
 import mimetypes
 import uuid
@@ -18,6 +16,7 @@ from .models import (
     ChatRoom, ChatParticipant, ChatMessage, ChatMessageRead,
     SupportTicket, ChatAnalytics, chat_user_display_name
 )
+from apps.product.serializers.owner_serializers import ProductListSerializer
 
 User = get_user_model()
 
@@ -32,6 +31,13 @@ class ChatRoomSerializer(serializers.ModelSerializer):
     unread_count = serializers.SerializerMethodField()
     current_user_role = serializers.SerializerMethodField()
     capabilities = serializers.SerializerMethodField()
+    display_title = serializers.SerializerMethodField()
+    avatar_url = serializers.SerializerMethodField()
+    market_id = serializers.UUIDField(source='market.id', read_only=True, allow_null=True)
+    market_business_id = serializers.CharField(
+        source='market.business_id', read_only=True, allow_null=True,
+    )
+    current_user_id = serializers.SerializerMethodField()
     
     class Meta:
         model = ChatRoom
@@ -41,6 +47,8 @@ class ChatRoomSerializer(serializers.ModelSerializer):
             'last_message_at', 'last_activity_at',
             'participant_count', 'last_message', 'unread_count',
             'current_user_role', 'capabilities',
+            'display_title', 'avatar_url', 'current_user_id',
+            'market_id', 'market_business_id',
             'is_encrypted', 'allow_file_sharing', 'max_participants',
             'content_type', 'object_id'
         ]
@@ -106,6 +114,40 @@ class ChatRoomSerializer(serializers.ModelSerializer):
             'can_leave': is_group and role is not None,
         }
 
+    @extend_schema_field(serializers.CharField())
+    def get_display_title(self, obj):
+        request = self.context.get('request')
+        if obj.market_id:
+            if request and request.user == obj.market.user and obj.customer_id:
+                return chat_user_display_name(obj.customer)
+            return obj.market.name
+        if request and request.user.is_authenticated:
+            other = obj.participants.exclude(pk=request.user.pk).first()
+            if other:
+                return chat_user_display_name(other)
+        return obj.name or 'گفتگو'
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_avatar_url(self, obj):
+        if not obj.market_id:
+            return None
+        request = self.context.get('request')
+        image = obj.market.logo_img
+        if request and request.user == obj.market.user and obj.customer_id:
+            profile = getattr(obj.customer, 'userprofile', None)
+            image = getattr(profile, 'picture', None)
+        if not image:
+            return None
+        url = image.url
+        return request.build_absolute_uri(url) if request else url
+
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_current_user_id(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return request.user.pk
+        return None
+
 
 class ChatRoomCreateSerializer(serializers.ModelSerializer):
     """
@@ -123,7 +165,6 @@ class ChatRoomCreateSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'description', 'room_type', 'participants',
             'is_encrypted', 'allow_file_sharing', 'max_participants',
-            'content_type', 'object_id'
         ]
         read_only_fields = ['id']
     
@@ -220,20 +261,22 @@ class ChatMessageSerializer(serializers.ModelSerializer):
     is_edited = serializers.BooleanField(read_only=True)
     edited_at = serializers.DateTimeField(read_only=True)
     read_by = serializers.SerializerMethodField()
+    product_summary = ProductListSerializer(source='product', read_only=True)
     
     class Meta:
         model = ChatMessage
         fields = [
-            'id', 'chat_room', 'sender', 'sender_username', 'sender_first_name', 'sender_last_name',
+            'id', 'client_id', 'chat_room', 'sender', 'sender_username', 'sender_first_name', 'sender_last_name',
             'message_type', 'content', 'file', 'file_name', 'file_size', 'file_size_mb',
             'file_type', 'file_url', 'latitude', 'longitude', 'status',
             'reply_to', 'reply_to_content', 'reply_to_sender',
             'is_edited', 'edited_at', 'is_deleted', 'sent_at',
-            'delivered_at', 'read_at', 'read_by'
+            'delivered_at', 'read_at', 'read_by', 'product',
+            'product_summary',
         ]
         read_only_fields = [
             'id', 'sent_at', 'delivered_at', 'read_at', 'status',
-            'is_edited', 'edited_at', 'is_deleted'
+            'is_edited', 'edited_at', 'is_deleted', 'product', 'client_id',
         ]
     
     def get_reply_to_content(self, obj) -> str | None:
@@ -284,13 +327,16 @@ class ChatMessageCreateSerializer(serializers.ModelSerializer):
     Serializer for creating chat messages
     """
     file_data = serializers.CharField(write_only=True, required=False)
+    product_id = serializers.UUIDField(write_only=True, required=False, allow_null=True)
+    client_id = serializers.UUIDField(required=False, allow_null=True)
+    content = serializers.CharField(required=False, allow_blank=True, default='')
     
     class Meta:
         model = ChatMessage
         fields = [
             'id', 'chat_room_id', 'sender', 'content', 'message_type',
             'file_data', 'reply_to', 'latitude', 'longitude', 'status',
-            'sent_at',
+            'sent_at', 'product_id', 'client_id',
         ]
         read_only_fields = ['id', 'sender', 'status', 'sent_at']
     

@@ -7,14 +7,13 @@ import logging
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.views import APIView
 from rest_framework.exceptions import PermissionDenied
 from apps.core.rate_limit import AtomicRateThrottle
 from apps.core.base_views import BaseAPIView
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from django.db.models import Q, Count, Avg, Max
-from django.core.cache import cache
+from django.db import transaction
+from django.db.models import Q
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils.decorators import method_decorator
@@ -22,8 +21,7 @@ from django.views.decorators.cache import cache_page
 from django.core.paginator import Paginator
 
 from .models import (
-    ChatRoom, ChatParticipant, ChatMessage, ChatMessageRead,
-    SupportTicket, ChatAnalytics, chat_user_display_name
+    ChatRoom, ChatParticipant, ChatMessage, SupportTicket, ChatAnalytics, chat_user_display_name
 )
 from .serializers import (
     ChatRoomSerializer, ChatParticipantSerializer, ChatMessageSerializer,
@@ -34,6 +32,9 @@ from .serializers import (
 from .services import (
     ChatService, ChatMembershipError, SupportService, ChatAnalyticsService,
 )
+from apps.market.models import Market
+from apps.product.models import Product
+from apps.product.serializers.owner_serializers import ProductListSerializer
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -63,7 +64,11 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
         """Get chat rooms for current user"""
         return ChatRoom.objects.filter(
             participants=self.request.user
-        ).prefetch_related('participants', 'messages').order_by('-last_message_at')
+        ).select_related(
+            'market', 'market__user', 'customer', 'customer__userprofile',
+        ).prefetch_related(
+            'participants', 'messages',
+        ).order_by('-last_message_at', '-created_at')
     
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
@@ -106,6 +111,85 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
             return self._membership_error(exc)
         output = ChatRoomSerializer(serializer.instance, context={'request': request})
         return Response(output.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='start-market')
+    def start_market(self, request):
+        """Return the unique customer conversation for a market."""
+        market_id = request.data.get('market_id')
+        product_id = request.data.get('product_id')
+        if not market_id:
+            return Response(
+                {'error': 'market_id is required', 'code': 'market_id_required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            market = Market.objects.select_related('user').get(pk=market_id)
+        except (Market.DoesNotExist, ValueError, TypeError):
+            return Response(
+                {'error': 'Market not found', 'code': 'market_not_found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if market.user_id == request.user.pk:
+            return Response(
+                {
+                    'error': 'Owners open customer conversations from their inbox.',
+                    'code': 'owner_cannot_start_own_market_chat',
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if market.status != Market.PUBLISHED:
+            return Response(
+                {'error': 'Market is not available', 'code': 'market_not_available'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        product = None
+        if product_id:
+            try:
+                product = Product.objects.prefetch_related('images').get(
+                    pk=product_id,
+                    market=market,
+                    status=Product.PUBLISHED,
+                )
+            except (Product.DoesNotExist, ValueError, TypeError):
+                return Response(
+                    {'error': 'Product not found', 'code': 'product_not_found'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        with transaction.atomic():
+            room, created = ChatRoom.objects.get_or_create(
+                market=market,
+                customer=request.user,
+                room_type=ChatRoom.MARKET,
+                defaults={
+                    'name': market.name,
+                    'description': '',
+                    'created_by': request.user,
+                    'max_participants': 2,
+                },
+            )
+            ChatParticipant.objects.get_or_create(chat_room=room, user=request.user)
+            ChatParticipant.objects.get_or_create(chat_room=room, user=market.user)
+            ChatAnalytics.objects.get_or_create(chat_room=room)
+
+        room = ChatRoom.objects.select_related(
+            'market', 'market__user', 'customer', 'customer__userprofile',
+        ).prefetch_related('participants').get(pk=room.pk)
+        payload = {
+            'room': ChatRoomSerializer(room, context={'request': request}).data,
+            'product': (
+                ProductListSerializer(product, context={'request': request}).data
+                if product else None
+            ),
+            'created': created,
+        }
+        return Response(
+            payload,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
@@ -362,6 +446,24 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
             # Check if user is participant
             if not room.is_participant(self.request.user):
                 raise PermissionDenied("User is not a participant in this chat room")
+
+            product = None
+            product_id = serializer.validated_data.get('product_id')
+            if product_id:
+                if not room.market_id:
+                    raise ValidationError('Products can only be attached to market chats')
+                try:
+                    product = Product.objects.get(
+                        pk=product_id,
+                        market_id=room.market_id,
+                        status=Product.PUBLISHED,
+                    )
+                except Product.DoesNotExist as exc:
+                    raise ValidationError('Product not found in this market') from exc
+
+            reply_to = serializer.validated_data.get('reply_to')
+            if reply_to and reply_to.chat_room_id != room.id:
+                raise ValidationError('Reply target must belong to the same room')
             
             message = chat_service.send_message(
                 chat_room=room,
@@ -369,7 +471,9 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
                 content=serializer.validated_data['content'],
                 message_type=serializer.validated_data.get('message_type', ChatMessage.TEXT),
                 file=self.request.FILES.get('file'),
-                reply_to=serializer.validated_data.get('reply_to')
+                reply_to=reply_to,
+                product=product,
+                client_id=serializer.validated_data.get('client_id'),
             )
             
             serializer.instance = message
@@ -377,6 +481,16 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
         except Exception as e:
             logger.error(f"Error creating message: {e}")
             raise
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        output = ChatMessageSerializer(
+            serializer.instance,
+            context={'request': request},
+        )
+        return Response(output.data, status=status.HTTP_201_CREATED)
     
     @action(detail=True, methods=['post'])
     def mark_as_read(self, request, pk=None):
@@ -490,8 +604,8 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
                 )
             
             # Get pagination parameters
-            page = int(request.query_params.get('page', 1))
-            page_size = int(request.query_params.get('page_size', 50))
+            page = max(1, int(request.query_params.get('page', 1)))
+            page_size = min(100, max(1, int(request.query_params.get('page_size', 50))))
             message_type = request.query_params.get('message_type')
             
             # Get messages
@@ -503,20 +617,29 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
                 message_type=message_type
             )
             
-            # Paginate results
-            paginator = Paginator(messages, page_size)
-            page_obj = paginator.get_page(page)
-            
-            serializer = ChatMessageSerializer(page_obj.object_list, many=True)
+            total_count = ChatMessage.objects.filter(
+                chat_room=room,
+                is_deleted=False,
+            )
+            if message_type:
+                total_count = total_count.filter(message_type=message_type)
+            total_count = total_count.count()
+            total_pages = (total_count + page_size - 1) // page_size
+
+            serializer = ChatMessageSerializer(
+                messages,
+                many=True,
+                context={'request': request},
+            )
             
             return Response({
                 'results': serializer.data,
-                'count': paginator.count,
+                'count': total_count,
                 'page': page,
                 'page_size': page_size,
-                'total_pages': paginator.num_pages,
-                'has_next': page_obj.has_next(),
-                'has_previous': page_obj.has_previous(),
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_previous': page > 1,
             })
             
         except ChatRoom.DoesNotExist:

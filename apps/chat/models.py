@@ -11,7 +11,6 @@ from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
 from apps.base.models import BaseModel
 import uuid
-import os
 
 User = get_user_model()
 
@@ -117,7 +116,8 @@ class ChatRoom(BaseModel):
         verbose_name=_('Content Type')
     )
     
-    object_id = models.PositiveIntegerField(
+    object_id = models.CharField(
+        max_length=64,
         null=True,
         blank=True,
         verbose_name=_('Object ID')
@@ -126,6 +126,24 @@ class ChatRoom(BaseModel):
     content_object = GenericForeignKey(
         'content_type',
         'object_id'
+    )
+
+    market = models.ForeignKey(
+        'market.Market',
+        on_delete=models.CASCADE,
+        related_name='chat_rooms',
+        null=True,
+        blank=True,
+        verbose_name=_('Market'),
+    )
+
+    customer = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='market_chat_rooms',
+        null=True,
+        blank=True,
+        verbose_name=_('Customer'),
     )
     
     # Settings
@@ -168,6 +186,14 @@ class ChatRoom(BaseModel):
             models.Index(fields=['created_by']),
             models.Index(fields=['last_message_at']),
             models.Index(fields=['content_type', 'object_id']),
+            models.Index(fields=['market', 'customer']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['market', 'customer'],
+                condition=models.Q(room_type='market'),
+                name='uniq_market_customer_chat',
+            ),
         ]
     
     def __str__(self):
@@ -330,6 +356,7 @@ class ChatMessage(BaseModel):
     VIDEO = 'video'
     LOCATION = 'location'
     SYSTEM = 'system'
+    PRODUCT = 'product'
     
     MESSAGE_TYPE_CHOICES = [
         (TEXT, _('Text')),
@@ -339,6 +366,7 @@ class ChatMessage(BaseModel):
         (VIDEO, _('Video')),
         (LOCATION, _('Location')),
         (SYSTEM, _('System')),
+        (PRODUCT, _('Product')),
     ]
     
     SENT = 'sent'
@@ -357,6 +385,12 @@ class ChatMessage(BaseModel):
         primary_key=True,
         default=uuid.uuid4,
         editable=False
+    )
+
+    client_id = models.UUIDField(
+        null=True,
+        blank=True,
+        verbose_name=_('Client Message ID'),
     )
     
     chat_room = models.ForeignKey(
@@ -457,6 +491,15 @@ class ChatMessage(BaseModel):
         related_name='replies',
         verbose_name=_('Reply To')
     )
+
+    product = models.ForeignKey(
+        'product.Product',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='chat_messages',
+        verbose_name=_('Related Product'),
+    )
     
     # Message metadata
     is_edited = models.BooleanField(
@@ -554,6 +597,14 @@ class ChatMessage(BaseModel):
             models.Index(fields=['message_type']),
             models.Index(fields=['status']),
             models.Index(fields=['reply_to']),
+            models.Index(fields=['product']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['sender', 'client_id'],
+                condition=models.Q(client_id__isnull=False),
+                name='uniq_chat_sender_client_message',
+            ),
         ]
     
     def __str__(self):

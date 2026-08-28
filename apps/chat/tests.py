@@ -6,23 +6,23 @@ Unit and integration tests for chat rooms, messages, and support tickets
 from django.test import TestCase, TransactionTestCase
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.core.exceptions import ValidationError
-from django.utils import timezone
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
-from django.urls import reverse
 from asgiref.sync import async_to_sync
 from channels.testing import WebsocketCommunicator
-from unittest.mock import patch, MagicMock
-import json
-import uuid
+from unittest.mock import patch
+from decimal import Decimal
+
+from apps.category.models import Category, Group, SubCategory
+from apps.market.models import Market
+from apps.product.models import Product
 
 from .models import (
-    ChatRoom, ChatParticipant, ChatMessage, ChatMessageRead,
+    ChatRoom, ChatMessage, ChatMessageRead,
     SupportTicket, ChatAnalytics
 )
 from .services import (
-    ChatService, ChatMembershipError, SupportService, ChatAnalyticsService,
+    ChatService, ChatMembershipError, SupportService,
 )
 from config.asgi import application
 
@@ -582,6 +582,140 @@ class ChatAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
+class MarketChatAPITests(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            mobile_number='09120001001',
+            email='market-owner@test.com',
+            password='testpass123',
+        )
+        self.customer = User.objects.create_user(
+            mobile_number='09120001002',
+            email='market-customer@test.com',
+            password='testpass123',
+        )
+        group = Group.objects.create(title='Chat group', market_fee=0)
+        category = Category.objects.create(
+            group=group,
+            title='Chat category',
+            market_fee=0,
+        )
+        subcategory = SubCategory.objects.create(
+            category=category,
+            title='Chat subcategory',
+            market_fee=0,
+        )
+        self.market = Market.objects.create(
+            user=self.owner,
+            type=Market.SHOP,
+            status=Market.PUBLISHED,
+            business_id='CHAT-MARKET-1',
+            name='Chat market',
+            sub_category=subcategory,
+        )
+        self.product = Product.objects.create(
+            market=self.market,
+            type=Product.GOOD,
+            name='Chat product',
+            sub_category=subcategory,
+            stock=2,
+            main_price=Decimal('1000.000'),
+            status=Product.PUBLISHED,
+            sell_type=Product.ONLINE,
+            ship_cost_pay_type=Product.FREE,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.customer)
+
+    def start_chat(self, **extra):
+        return self.client.post(
+            '/api/v1/chat/rooms/start-market/',
+            {'market_id': str(self.market.id), **extra},
+            format='json',
+        )
+
+    def test_start_market_chat_is_idempotent(self):
+        first = self.start_chat()
+        second = self.start_chat()
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data['room']['id'], second.data['room']['id'])
+        room = ChatRoom.objects.get(pk=first.data['room']['id'])
+        self.assertEqual(room.market, self.market)
+        self.assertEqual(room.customer, self.customer)
+        self.assertTrue(room.is_participant(self.customer))
+        self.assertTrue(room.is_participant(self.owner))
+
+    def test_product_context_and_message_are_scoped_to_market(self):
+        started = self.start_chat(product_id=str(self.product.id))
+        self.assertEqual(started.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(started.data['product']['id'], str(self.product.id))
+
+        response = self.client.post(
+            '/api/v1/chat/messages/',
+            {
+                'chat_room_id': started.data['room']['id'],
+                'content': 'این کالا موجود است؟',
+                'message_type': ChatMessage.TEXT,
+                'product_id': str(self.product.id),
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(str(response.data['product']), str(self.product.id))
+        self.assertEqual(response.data['product_summary']['name'], self.product.name)
+
+    def test_market_owner_cannot_start_chat_with_self(self):
+        self.client.force_authenticate(self.owner)
+        response = self.start_chat()
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+
+    def test_client_message_id_makes_retries_idempotent(self):
+        room_id = self.start_chat().data['room']['id']
+        payload = {
+            'chat_room_id': room_id,
+            'content': 'Retry-safe message',
+            'message_type': ChatMessage.TEXT,
+            'client_id': '4d5d2f18-91fc-4d92-b23f-8502f06ba936',
+        }
+
+        first = self.client.post('/api/v1/chat/messages/', payload, format='json')
+        second = self.client.post('/api/v1/chat/messages/', payload, format='json')
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(first.data['id'], second.data['id'])
+        self.assertEqual(
+            ChatMessage.objects.filter(
+                sender=self.customer,
+                client_id=payload['client_id'],
+            ).count(),
+            1,
+        )
+
+    def test_room_message_pagination_reports_total_count(self):
+        room_id = self.start_chat().data['room']['id']
+        room = ChatRoom.objects.get(pk=room_id)
+        for index in range(5):
+            ChatMessage.objects.create(
+                chat_room=room,
+                sender=self.customer,
+                content=f'Message {index}',
+            )
+
+        response = self.client.get(
+            '/api/v1/chat/messages/room_messages/',
+            {'room_id': room_id, 'page': 2, 'page_size': 2},
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 5)
+        self.assertEqual(response.data['total_pages'], 3)
+        self.assertTrue(response.data['has_next'])
+        self.assertTrue(response.data['has_previous'])
+        self.assertEqual(len(response.data['results']), 2)
+
+
 class ChatWebSocketTests(TransactionTestCase):
     """Test cases for WebSocket functionality"""
     
@@ -855,7 +989,6 @@ class ChatIntegrationTests(TestCase):
             )
         
         # Test search
-        from django.db.models import Q
         search_results = ChatMessage.objects.filter(
             chat_room=room,
             content__icontains='test'

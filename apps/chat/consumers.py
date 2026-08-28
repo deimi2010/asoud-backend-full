@@ -10,16 +10,15 @@ from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 import base64
-import mimetypes
 import uuid
 
 from .models import (
-    ChatRoom, ChatMessage, ChatParticipant, SupportTicket,
+    ChatRoom, ChatMessage, SupportTicket,
     chat_user_display_name,
 )
-from .services import ChatService, SupportService
+from .services import ChatService
+from apps.product.models import Product
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -156,6 +155,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             content = data.get('content', '').strip()
             message_type = data.get('message_type', 'text')
             reply_to_id = data.get('reply_to_id')
+            product_id = data.get('product_id')
+            client_id = data.get('client_id')
             file_data = data.get('file_data')
             
             if not content and not file_data:
@@ -170,6 +171,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             message_data = {
                 'content': content,
                 'message_type': message_type,
+                'client_id': client_id,
             }
             
             # Handle file upload
@@ -180,14 +182,25 @@ class ChatConsumer(AsyncWebsocketConsumer):
             
             # Handle reply
             if reply_to_id:
-                reply_to = await self.get_message(reply_to_id)
+                reply_to = await self.get_message(reply_to_id, self.room_id)
                 if reply_to:
                     message_data['reply_to'] = reply_to
+
+            if product_id:
+                product = await self.get_product(product_id, room)
+                if not product:
+                    await self.send(text_data=json.dumps({
+                        'type': 'message_error',
+                        'code': 'product_not_found',
+                    }))
+                    return
+                message_data['product'] = product
             
             # Create message
             message = await self.create_message(room, message_data)
             
             if message:
+                product_payload = await self.get_product_payload(message.product_id)
                 # Send message to room group
                 await self.channel_layer.group_send(
                     self.room_group_name,
@@ -195,6 +208,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         'type': 'chat_message',
                         'message': {
                             'id': str(message.id),
+                            'client_id': str(message.client_id) if message.client_id else None,
                             'sender_id': message.sender.id,
                             'sender_username': chat_user_display_name(message.sender),
                             'content': message.content,
@@ -202,6 +216,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                             'file_name': message.file_name,
                             'file_size': message.file_size,
                             'file_type': message.file_type,
+                            'file_url': message.file.url if message.file else None,
                             'reply_to': {
                                 'id': str(message.reply_to.id),
                                 'content': message.reply_to.content[:50] + '...' if len(message.reply_to.content) > 50 else message.reply_to.content,
@@ -209,6 +224,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                             } if message.reply_to else None,
                             'sent_at': message.sent_at.isoformat(),
                             'status': message.status,
+                            'product': product_payload,
                         }
                     }
                 )
@@ -253,9 +269,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
         try:
             message_id = data.get('message_id')
             if message_id:
-                message = await self.get_message(message_id)
+                message = await self.get_message(message_id, self.room_id)
                 if message:
-                    await self.mark_message_as_read(message)
+                    if await self.mark_message_as_read(message):
+                        await self.channel_layer.group_send(
+                            self.room_group_name,
+                            {
+                                'type': 'message_read',
+                                'message_id': str(message.id),
+                                'reader_id': self.user.id,
+                            },
+                        )
         except Exception as e:
             logger.error(f"Error handling mark as read: {e}")
     
@@ -279,6 +303,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
             }))
         except Exception as e:
             logger.error(f"Error sending chat message: {e}")
+
+    async def message_read(self, event):
+        """Notify participants that a message was read."""
+        await self.send(text_data=json.dumps({
+            'type': 'message_read',
+            'message_id': event['message_id'],
+            'reader_id': event['reader_id'],
+        }))
     
     async def typing(self, event):
         """Send typing indicator to WebSocket"""
@@ -361,12 +393,45 @@ class ChatConsumer(AsyncWebsocketConsumer):
         return room.is_participant(user)
     
     @database_sync_to_async
-    def get_message(self, message_id):
+    def get_message(self, message_id, room_id=None):
         """Get message by ID"""
         try:
-            return ChatMessage.objects.get(id=message_id)
+            messages = ChatMessage.objects.all()
+            if room_id:
+                messages = messages.filter(chat_room_id=room_id)
+            return messages.get(id=message_id)
         except ChatMessage.DoesNotExist:
             return None
+
+    @database_sync_to_async
+    def get_product(self, product_id, room):
+        if not room.market_id:
+            return None
+        try:
+            return Product.objects.get(
+                pk=product_id,
+                market_id=room.market_id,
+                status=Product.PUBLISHED,
+            )
+        except (Product.DoesNotExist, ValueError, TypeError):
+            return None
+
+    @database_sync_to_async
+    def get_product_payload(self, product_id):
+        if not product_id:
+            return None
+        try:
+            product = Product.objects.prefetch_related('images').get(pk=product_id)
+        except Product.DoesNotExist:
+            return None
+        image = product.images.first()
+        return {
+            'id': str(product.id),
+            'name': product.name,
+            'main_price': str(product.main_price),
+            'image': image.image.url if image else None,
+            'market_id': str(product.market_id),
+        }
     
     @database_sync_to_async
     def create_message(self, room, message_data):
@@ -399,10 +464,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
             messages = await database_sync_to_async(chat_service.get_messages)(room, self.user, 20)
             
             for message in messages:
+                product_payload = await self.get_product_payload(message.product_id)
                 await self.send(text_data=json.dumps({
                     'type': 'chat_message',
                     'message': {
                         'id': str(message.id),
+                        'client_id': str(message.client_id) if message.client_id else None,
                         'sender_id': message.sender.id,
                         'sender_username': chat_user_display_name(message.sender),
                         'content': message.content,
@@ -410,6 +477,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         'file_name': message.file_name,
                         'file_size': message.file_size,
                         'file_type': message.file_type,
+                        'file_url': message.file.url if message.file else None,
                         'reply_to': {
                             'id': str(message.reply_to.id),
                             'content': message.reply_to.content[:50] + '...' if len(message.reply_to.content) > 50 else message.reply_to.content,
@@ -417,6 +485,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         } if message.reply_to else None,
                         'sent_at': message.sent_at.isoformat(),
                         'status': message.status,
+                        'product': product_payload,
                     }
                 }))
         except Exception as e:
@@ -430,6 +499,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             
             # Decode base64 data
             file_content = base64.b64decode(file_data['content'])
+            if len(file_content) > 10 * 1024 * 1024:
+                return None
             file_name = file_data.get('name', f"file_{uuid.uuid4().hex}")
             file_type = file_data.get('type', 'application/octet-stream')
             
