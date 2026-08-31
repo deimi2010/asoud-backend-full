@@ -218,7 +218,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
-    def get_documents(self, obj):
+    def get_documents(self, obj) -> list[dict]:
         return UserDocumentSerializer(obj.user.userdocument_set.all(), many=True).data
 
     def validate_national_code(self, value):
@@ -260,7 +260,7 @@ class UserDocumentSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'status', 'review_note', 'created_at')
         extra_kwargs = {'file': {'write_only': True}}
 
-    def get_download_url(self, obj):
+    def get_download_url(self, obj) -> str:
         request = self.context.get('request')
         path = f'/api/v1/user/profile/documents/{obj.id}/download/'
         return request.build_absolute_uri(path) if request else path

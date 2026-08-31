@@ -6,11 +6,13 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import parsers, permissions, serializers, status, views
 from rest_framework.response import Response
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema, inline_serializer
 
 from apps.market.access import accessible_markets
 from apps.sms.models import Contact, Line, SmsCampaign, SmsRecipient, Template
 from apps.sms.serializers.owner import (
-    CampaignCreateSerializer, ContactSerializer, LineListSerializer,
+    CampaignCreateSerializer, SmsContactSerializer, LineListSerializer,
     SmsCampaignSerializer, SmsTariffSerializer, TemplateCreateSerializer,
     TemplateListSerializer, normalize_mobile,
 )
@@ -25,6 +27,7 @@ def api_data(data, code=200):
 class SmsDashboardView(views.APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
+    @extend_schema(responses={200: OpenApiTypes.OBJECT}, tags=['SMS Panel'])
     def get(self, request):
         campaigns = SmsCampaign.objects.filter(user=request.user)
         tariff = active_tariff()
@@ -39,6 +42,7 @@ class SmsDashboardView(views.APIView):
 class LineListView(views.APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
+    @extend_schema(responses={200: LineListSerializer(many=True)}, tags=['SMS Panel'])
     def get(self, request):
         return api_data(LineListSerializer(Line.objects.filter(is_active=True), many=True).data)
 
@@ -46,12 +50,18 @@ class LineListView(views.APIView):
 class TemplateListView(views.APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
+    @extend_schema(responses={200: TemplateListSerializer(many=True)}, tags=['SMS Panel'])
     def get(self, request):
         templates = Template.objects.filter(is_active=True).filter(
             Q(is_public=True, approval_status='approved') | Q(owner=request.user)
         ).order_by('title')
         return api_data(TemplateListSerializer(templates, many=True).data)
 
+    @extend_schema(
+        request=TemplateCreateSerializer,
+        responses={201: TemplateListSerializer},
+        tags=['SMS Panel'],
+    )
     def post(self, request):
         serializer = TemplateCreateSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
@@ -62,12 +72,18 @@ class TemplateListView(views.APIView):
 class ContactListCreateView(views.APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
+    @extend_schema(responses={200: SmsContactSerializer(many=True)}, tags=['SMS Panel'])
     def get(self, request):
         contacts = Contact.objects.filter(user=request.user).order_by('name', 'mobile_number')
-        return api_data(ContactSerializer(contacts, many=True).data)
+        return api_data(SmsContactSerializer(contacts, many=True).data)
 
+    @extend_schema(
+        request=SmsContactSerializer,
+        responses={201: SmsContactSerializer},
+        tags=['SMS Panel'],
+    )
     def post(self, request):
-        serializer = ContactSerializer(data=request.data)
+        serializer = SmsContactSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         contact, _ = Contact.objects.update_or_create(
             user=request.user,
@@ -78,13 +94,21 @@ class ContactListCreateView(views.APIView):
                 'has_consent': serializer.validated_data.get('has_consent', False),
             },
         )
-        return api_data(ContactSerializer(contact).data, status.HTTP_201_CREATED)
+        return api_data(SmsContactSerializer(contact).data, status.HTTP_201_CREATED)
 
 
 class ContactExcelUploadView(views.APIView):
     permission_classes = (permissions.IsAuthenticated,)
     parser_classes = (parsers.MultiPartParser,)
 
+    @extend_schema(
+        request=inline_serializer(
+            name='SmsContactExcelUpload',
+            fields={'file': serializers.FileField()},
+        ),
+        responses={200: OpenApiTypes.OBJECT},
+        tags=['SMS Panel'],
+    )
     def post(self, request):
         upload = request.FILES.get('file')
         if not upload or not upload.name.lower().endswith('.xlsx'):
@@ -115,17 +139,23 @@ class ContactExcelUploadView(views.APIView):
                 imported.append(contact)
         return api_data({
             'imported_count': len(imported), 'rejected': rejected,
-            'contacts': ContactSerializer(imported, many=True).data,
+            'contacts': SmsContactSerializer(imported, many=True).data,
         })
 
 
 class CampaignListCreateView(views.APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
+    @extend_schema(responses={200: SmsCampaignSerializer(many=True)}, tags=['SMS Panel'])
     def get(self, request):
         campaigns = SmsCampaign.objects.filter(user=request.user).prefetch_related('recipients')
         return api_data(SmsCampaignSerializer(campaigns, many=True).data)
 
+    @extend_schema(
+        request=CampaignCreateSerializer,
+        responses={201: SmsCampaignSerializer},
+        tags=['SMS Panel'],
+    )
     @transaction.atomic
     def post(self, request):
         if getattr(settings, 'SMS_BILLING_ENABLED', True) is False:
@@ -185,6 +215,7 @@ class CampaignListCreateView(views.APIView):
 class CampaignDetailView(views.APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
+    @extend_schema(responses={200: SmsCampaignSerializer}, tags=['SMS Panel'])
     def get(self, request, pk):
         campaign = get_object_or_404(
             SmsCampaign.objects.prefetch_related('recipients'), id=pk, user=request.user,
@@ -195,6 +226,7 @@ class CampaignDetailView(views.APIView):
 class CampaignPayView(views.APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
+    @extend_schema(request=None, responses={200: SmsCampaignSerializer}, tags=['SMS Panel'])
     def post(self, request, pk):
         campaign = get_object_or_404(SmsCampaign, id=pk, user=request.user)
         campaign, paid, error = reserve_campaign(campaign, request.user)

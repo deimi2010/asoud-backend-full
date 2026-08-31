@@ -97,6 +97,10 @@ class SelfDocumentView(views.APIView):
     permission_classes = (permissions.IsAuthenticated,)
     parser_classes = (parsers.MultiPartParser, parsers.FormParser)
 
+    @extend_schema(
+        responses={200: serializers.UserDocumentSerializer(many=True)},
+        tags=["Profile"],
+    )
     def get(self, request):
         documents = UserDocument.objects.filter(user=request.user).order_by('document_type')
         data = serializers.UserDocumentSerializer(
@@ -104,6 +108,11 @@ class SelfDocumentView(views.APIView):
         ).data
         return Response(ApiResponse(success=True, code=200, data=data))
 
+    @extend_schema(
+        request=serializers.UserDocumentSerializer,
+        responses={201: serializers.UserDocumentSerializer},
+        tags=["Profile"],
+    )
     @transaction.atomic
     def post(self, request):
         serializer = serializers.UserDocumentSerializer(data=request.data, context={'request': request})
@@ -120,6 +129,7 @@ class SelfDocumentView(views.APIView):
         data = serializers.UserDocumentSerializer(document, context={'request': request}).data
         return Response(ApiResponse(success=True, code=201, data=data), status=status.HTTP_201_CREATED)
 
+    @extend_schema(request=None, responses={204: None}, tags=["Profile"])
     @transaction.atomic
     def delete(self, request):
         deleted, _ = UserDocument.objects.filter(
@@ -131,6 +141,11 @@ class SelfDocumentView(views.APIView):
 class SelfProfileSubmitView(views.APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
+    @extend_schema(
+        request=None,
+        responses={200: serializers.UserProfileSerializer},
+        tags=["Profile"],
+    )
     @transaction.atomic
     def post(self, request):
         profile = UserProfile.objects.select_for_update().filter(user=request.user).first()
@@ -165,6 +180,10 @@ class SelfProfileSubmitView(views.APIView):
 class SelfDocumentDownloadView(views.APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
+    @extend_schema(
+        responses={200: OpenApiResponse(description="Private identity document file")},
+        tags=["Profile"],
+    )
     def get(self, request, pk):
         document = UserDocument.objects.filter(id=pk, user=request.user).first()
         if not document or not document.file:

@@ -55,7 +55,7 @@ class TemplateCreateSerializer(serializers.ModelSerializer):
         )
 
 
-class ContactSerializer(serializers.ModelSerializer):
+class SmsContactSerializer(serializers.ModelSerializer):
     class Meta:
         model = Contact
         fields = ('id', 'name', 'mobile_number', 'source', 'has_consent')
