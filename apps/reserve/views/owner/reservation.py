@@ -6,6 +6,7 @@ from rest_framework import permissions, serializers, status, views
 from rest_framework.response import Response
 
 from apps.reserve.models import Reservation
+from apps.reserve.lifecycle import notify_after_commit, refund_paid_reservation
 from apps.market.access import market_access_filter
 from apps.reserve.serializers.owner import ReservationSerializer, ReservationStatusSerializer
 from apps.reserve.services import expire_stale_holds
@@ -25,6 +26,8 @@ def _owned_reservations(user):
             'reserve__service__market__sub_category',
             'service',
             'service__market',
+            'service__market__location',
+            'service__market__contact',
             'service__product',
             'specialist',
         )
@@ -113,6 +116,14 @@ class ReservationStatusView(views.APIView):
             reservation.cancellation_reason = serializer.validated_data.get('reason', '')
             fields.extend(('cancelled_at', 'cancellation_reason'))
         reservation.save(update_fields=fields)
+        if target == Reservation.CANCELLED:
+            refund_paid_reservation(
+                reservation,
+                reservation.cancellation_reason or 'لغو نوبت توسط فروشگاه',
+            )
+            notify_after_commit(reservation, 'cancelled')
+        elif target == Reservation.CONFIRMED:
+            notify_after_commit(reservation, 'confirmed')
         return Response(ApiResponse(
             success=True, code=200, data=ReservationSerializer(reservation).data,
         ))

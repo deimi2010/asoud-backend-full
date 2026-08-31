@@ -237,6 +237,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # tenant scoping are repaired and explicitly enabled in a later release.
 ANALYTICS_ENABLED = False
 SMS_MOCK_SEND = False
+SMS_SYSTEM_LINE_NUMBER = os.environ.get('SMS_SYSTEM_LINE_NUMBER', '10008666')
 OTP_ALLOW_LOCAL_CACHE = False
 ASOUD_TOKEN_TTL_SECONDS = int(os.environ.get('ASOUD_TOKEN_TTL_SECONDS', 30 * 24 * 60 * 60))
 ASOUD_WS_TICKET_TTL_SECONDS = int(os.environ.get('ASOUD_WS_TICKET_TTL_SECONDS', 60))

@@ -62,6 +62,7 @@ class NotificationTemplate(BaseModel):
     DISCOUNT_AVAILABLE = 'discount_available'
     SYSTEM_MAINTENANCE = 'system_maintenance'
     SECURITY_ALERT = 'security_alert'
+    APPOINTMENT_UPDATE = 'appointment_update'
     
     TYPE_CHOICES = [
         (ORDER_CONFIRMED, _('Order Confirmed')),
@@ -72,6 +73,7 @@ class NotificationTemplate(BaseModel):
         (DISCOUNT_AVAILABLE, _('Discount Available')),
         (SYSTEM_MAINTENANCE, _('System Maintenance')),
         (SECURITY_ALERT, _('Security Alert')),
+        (APPOINTMENT_UPDATE, _('Appointment update')),
     ]
     
     name = models.CharField(

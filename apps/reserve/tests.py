@@ -5,17 +5,20 @@ from django.test import TestCase
 from django.utils import timezone
 from django.urls import resolve
 from rest_framework.test import APIClient
+from unittest.mock import patch
 
 from apps.category.models import Category, Group, SubCategory
 from apps.market.models import Market, MarketMembership, MarketSchedule
 from apps.reserve.models import DayOff, Reservation, ReserveTime, Service, Specialist
 from apps.reserve.services import available_slots, hold_reservation, market_weekday
+from apps.reserve.lifecycle import process_appointment_reminders
 from apps.reserve.views.user.reservation import (
     ReservationCreateView,
     ReservationDetailView,
     ReservationListView,
 )
 from apps.users.models import User
+from apps.wallet.models import Transaction, Wallet
 
 
 class ReservationIntegrityTests(TestCase):
@@ -477,3 +480,90 @@ class ReservationIntegrityTests(TestCase):
             ),
             [],
         )
+
+    def test_paid_customer_cancellation_refunds_wallet_once(self):
+        self.specialist.market = self.market
+        self.specialist.save(update_fields=('market', 'updated_at'))
+        reservation = Reservation.objects.create(
+            user=self.buyer,
+            service=self.service,
+            specialist=self.specialist,
+            scheduled_start=timezone.now() + timedelta(days=3),
+            scheduled_end=timezone.now() + timedelta(days=3, minutes=30),
+            status=Reservation.CONFIRMED,
+            is_paid=True,
+            amount_due=2500,
+            service_name_snapshot=self.service.name,
+        )
+        self.client.force_authenticate(self.buyer)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f'/api/v1/reservation/user/reservation/{reservation.id}/cancel',
+                {},
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.refund_amount, 2500)
+        self.assertIsNotNone(reservation.refunded_at)
+        self.assertEqual(Wallet.objects.get(user=self.buyer).balance, 2500)
+        self.assertEqual(
+            Transaction.objects.filter(action=f'appointment_refund:{reservation.id}').count(),
+            1,
+        )
+        repeated = self.client.post(
+            f'/api/v1/reservation/user/reservation/{reservation.id}/cancel',
+            {},
+            format='json',
+        )
+        self.assertEqual(repeated.status_code, 404)
+        self.assertEqual(Wallet.objects.get(user=self.buyer).balance, 2500)
+
+    def test_tracking_detail_is_private_and_contains_store_context(self):
+        self.specialist.market = self.market
+        self.specialist.save(update_fields=('market', 'updated_at'))
+        reservation = Reservation.objects.create(
+            user=self.buyer,
+            service=self.service,
+            specialist=self.specialist,
+            scheduled_start=timezone.now() + timedelta(days=2),
+            scheduled_end=timezone.now() + timedelta(days=2, minutes=30),
+            status=Reservation.CONFIRMED,
+            service_name_snapshot=self.service.name,
+        )
+        url = (
+            '/api/v1/reservation/user/reservation/tracking/'
+            f'{reservation.tracking_code}'
+        )
+        self.client.force_authenticate(self.buyer)
+        own = self.client.get(url)
+        self.client.force_authenticate(self.other_buyer)
+        foreign = self.client.get(url)
+
+        self.assertEqual(own.status_code, 200)
+        self.assertEqual(own.data['data']['market']['id'], str(self.market.id))
+        self.assertEqual(own.data['data']['appointment_url'], f'https://asoud.ir/appointments/{reservation.tracking_code}')
+        self.assertEqual(foreign.status_code, 404)
+
+    @patch('apps.reserve.lifecycle.send_appointment_sms', return_value=True)
+    def test_due_reminders_are_marked_once(self, send_sms):
+        self.specialist.market = self.market
+        self.specialist.save(update_fields=('market', 'updated_at'))
+        reservation = Reservation.objects.create(
+            user=self.buyer,
+            service=self.service,
+            specialist=self.specialist,
+            scheduled_start=timezone.now() + timedelta(hours=1),
+            scheduled_end=timezone.now() + timedelta(hours=1, minutes=30),
+            status=Reservation.CONFIRMED,
+            service_name_snapshot=self.service.name,
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(process_appointment_reminders(), 1)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(process_appointment_reminders(), 0)
+
+        reservation.refresh_from_db()
+        self.assertIsNotNone(reservation.reminder_2h_sent_at)
+        send_sms.assert_called_once_with(reservation.id, 'reminder_2h')

@@ -1,0 +1,32 @@
+from decimal import Decimal
+
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+    dependencies = [
+        ('reserve', '0003_specialisttimeoff_reservation_amount_due_and_more'),
+    ]
+
+    operations = [
+        migrations.AddField(
+            model_name='reservation',
+            name='refund_amount',
+            field=models.DecimalField(decimal_places=0, default=Decimal('0'), max_digits=18),
+        ),
+        migrations.AddField(
+            model_name='reservation',
+            name='refunded_at',
+            field=models.DateTimeField(blank=True, null=True),
+        ),
+        migrations.AddField(
+            model_name='reservation',
+            name='reminder_24h_sent_at',
+            field=models.DateTimeField(blank=True, null=True),
+        ),
+        migrations.AddField(
+            model_name='reservation',
+            name='reminder_2h_sent_at',
+            field=models.DateTimeField(blank=True, null=True),
+        ),
+    ]

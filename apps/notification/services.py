@@ -45,7 +45,8 @@ class NotificationService:
         data: Optional[Dict] = None,
         priority: str = 'medium',
         scheduled_at: Optional[datetime] = None,
-        content_object=None
+        content_object=None,
+        force: bool = False,
     ) -> bool:
         """
         Send a notification to a user
@@ -66,7 +67,7 @@ class NotificationService:
         """
         try:
             # Check user preferences
-            if not self._should_send_notification(user, notification_type, channel):
+            if not force and not self._should_send_notification(user, notification_type, channel):
                 logger.info(f"Notification skipped due to user preferences: {user.id}")
                 return False
             
@@ -468,8 +469,21 @@ class SMSNotificationProvider(BaseNotificationProvider):
     
     def send(self, notification: Notification) -> bool:
         """Send SMS notification"""
-        logger.warning("SMS notification provider is not configured")
-        return False
+        from django.conf import settings
+        from apps.sms.sms_core import SMSCoreHandler
+
+        mobile = getattr(notification.user, 'mobile_number', '')
+        if not mobile:
+            logger.warning('SMS recipient has no mobile number: %s', notification.user_id)
+            return False
+        line_number = getattr(settings, 'SMS_SYSTEM_LINE_NUMBER', '10008666')
+        result = SMSCoreHandler.send_bulk({
+            'lineNumber': str(line_number),
+            'messageText': notification.body,
+            'mobiles': [str(mobile)],
+            'sendDateTime': None,
+        })
+        return isinstance(result, dict) and result.get('status') == 1
 
 
 class WebSocketNotificationProvider(BaseNotificationProvider):

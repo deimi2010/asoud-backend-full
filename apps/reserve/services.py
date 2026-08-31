@@ -50,7 +50,7 @@ def _is_time_off(specialist, day, start_time, end_time):
     return False
 
 
-def available_slots(*, service, specialist, day, now=None):
+def available_slots(*, service, specialist, day, now=None, exclude_reservation_id=None):
     now = now or timezone.now()
     expire_stale_holds(now)
     if (
@@ -82,12 +82,15 @@ def available_slots(*, service, specialist, day, now=None):
                 timezone.localtime(cursor).time(),
                 timezone.localtime(slot_end).time(),
             ):
-                used = Reservation.objects.filter(
+                occupied = Reservation.objects.filter(
                     specialist=specialist,
                     scheduled_start__lt=slot_end,
                     scheduled_end__gt=cursor,
                     status__in=ACTIVE_RESERVATION_STATUSES,
-                ).count()
+                )
+                if exclude_reservation_id:
+                    occupied = occupied.exclude(id=exclude_reservation_id)
+                used = occupied.count()
                 slots.append({
                     'start': cursor,
                     'end': slot_end,

@@ -213,16 +213,54 @@ class ReservationSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     reserve = ReserveTimeSerializer(read_only=True)
     specialist_name = serializers.CharField(source='specialist.user', read_only=True)
+    market = serializers.SerializerMethodField()
+    appointment_url = serializers.SerializerMethodField()
+
+    def _market(self, obj):
+        if obj.service_id:
+            return obj.service.market
+        if obj.reserve_id:
+            return obj.reserve.service.market
+        return None
+
+    def get_market(self, obj):
+        market = self._market(obj)
+        if market is None:
+            return None
+        try:
+            location = market.location
+        except Exception:
+            location = None
+        try:
+            contact = market.contact
+        except Exception:
+            contact = None
+        return {
+            'id': str(market.id),
+            'name': market.name,
+            'business_id': market.business_id,
+            'logo': market.logo_img.url if market.logo_img else None,
+            'address': location.address if location else None,
+            'latitude': str(location.latitude) if location else None,
+            'longitude': str(location.longitude) if location else None,
+            'mobile': contact.first_mobile_number if contact else None,
+            'telephone': contact.telephone if contact else None,
+        }
+
+    def get_appointment_url(self, obj):
+        return f'https://asoud.ir/appointments/{obj.tracking_code}'
 
     class Meta:
         model = Reservation
         fields = [
             'id', 'tracking_code', 'user', 'reserve', 'service', 'specialist',
             'specialist_name',
+            'market', 'appointment_url',
             'scheduled_start', 'scheduled_end', 'status', 'is_paid',
             'service_name_snapshot', 'price_snapshot', 'payment_mode_snapshot',
             'amount_due', 'hold_expires_at', 'confirmed_at', 'cancelled_at',
             'cancellation_reason', 'created_at',
+            'refund_amount', 'refunded_at',
         ]
         read_only_fields = fields
 

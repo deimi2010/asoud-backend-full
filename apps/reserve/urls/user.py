@@ -13,6 +13,7 @@ from apps.reserve.views.user.reservation import(
     ReservationListView,
     ReservationCancelView,
     ReservationRescheduleView,
+    ReservationTrackingDetailView,
 )
 
 app_name = 'reserve_user'
@@ -26,6 +27,11 @@ urlpatterns = [
 
     path('reservation/create', ReservationCreateView.as_view(), name="reservation-create"),
     path('reservation/<uuid:pk>', ReservationDetailView.as_view(), name="reservation-detail"),
+    path(
+        'reservation/tracking/<str:tracking_code>',
+        ReservationTrackingDetailView.as_view(),
+        name='reservation-tracking-detail',
+    ),
     path('reservation/<uuid:pk>/cancel', ReservationCancelView.as_view(), name="reservation-cancel"),
     path('reservation/<uuid:pk>/reschedule', ReservationRescheduleView.as_view(), name="reservation-reschedule"),
     path('reservation/', ReservationListView.as_view(), name="reservation-list"),

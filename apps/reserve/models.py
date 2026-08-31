@@ -295,6 +295,14 @@ class Reservation(BaseModel):
         decimal_places=MONEY_DECIMAL_PLACES,
         default=Decimal('0'),
     )
+    refund_amount = models.DecimalField(
+        max_digits=MONEY_MAX_DIGITS,
+        decimal_places=MONEY_DECIMAL_PLACES,
+        default=Decimal('0'),
+    )
+    refunded_at = models.DateTimeField(null=True, blank=True)
+    reminder_24h_sent_at = models.DateTimeField(null=True, blank=True)
+    reminder_2h_sent_at = models.DateTimeField(null=True, blank=True)
     class Meta:
         db_table = "reservation"
         verbose_name = _('Reservation')

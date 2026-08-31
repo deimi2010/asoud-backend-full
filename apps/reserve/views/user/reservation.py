@@ -9,6 +9,7 @@ from rest_framework.response import Response
 
 from apps.market.models import Market
 from apps.reserve.models import Reservation, ReserveTime, Service, Specialist
+from apps.reserve.lifecycle import notify_after_commit, refund_paid_reservation
 from apps.reserve.serializers.owner import ReservationSerializer
 from apps.reserve.serializers.user import (
     ReservationCancelSerializer,
@@ -28,6 +29,9 @@ def _reservation_queryset():
         'reserve__service__market',
         'reserve__service__market__sub_category',
         'service',
+        'service__market',
+        'service__market__location',
+        'service__market__contact',
         'service__product',
         'specialist',
     ).prefetch_related(
@@ -108,6 +112,10 @@ class ReservationCreateView(views.APIView):
                     status=status.HTTP_409_CONFLICT,
                 )
             reservation = _reservation_queryset().get(id=reservation.id)
+            if reservation.status == Reservation.PENDING_CONFIRMATION:
+                notify_after_commit(reservation, 'requested')
+            elif reservation.status == Reservation.CONFIRMED:
+                notify_after_commit(reservation, 'confirmed')
             return Response(
                 ApiResponse(
                     success=True,
@@ -164,6 +172,23 @@ class ReservationCreateView(views.APIView):
         )
 
 
+class ReservationTrackingDetailView(views.APIView):
+    serializer_class = ReservationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, tracking_code):
+        reservation = get_object_or_404(
+            _reservation_queryset(),
+            tracking_code=tracking_code,
+            user=request.user,
+        )
+        return Response(ApiResponse(
+            success=True,
+            code=status.HTTP_200_OK,
+            data=ReservationSerializer(reservation).data,
+        ))
+
+
 class ReservationCancelView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ReservationCancelSerializer
@@ -202,6 +227,11 @@ class ReservationCancelView(views.APIView):
         reservation.save(update_fields=(
             'status', 'cancelled_at', 'cancellation_reason', 'updated_at',
         ))
+        refund_paid_reservation(
+            reservation,
+            reservation.cancellation_reason or 'لغو نوبت توسط مشتری',
+        )
+        notify_after_commit(reservation, 'cancelled')
         return Response(ApiResponse(
             success=True, code=200, data=ReservationSerializer(reservation).data,
         ))
@@ -226,11 +256,16 @@ class ReservationRescheduleView(views.APIView):
             hours=reservation.service.cancellation_hours,
         ):
             return Response(status=status.HTTP_409_CONFLICT)
+        specialist = Specialist.objects.select_for_update().get(
+            id=reservation.specialist_id,
+            is_active=True,
+        )
         new_start = serializer.validated_data['scheduled_start']
         slot = next((item for item in available_slots(
             service=reservation.service,
-            specialist=reservation.specialist,
+            specialist=specialist,
             day=timezone.localtime(new_start).date(),
+            exclude_reservation_id=reservation.id,
         ) if item['start'] == new_start and item['available']), None)
         if slot is None:
             return Response(status=status.HTTP_409_CONFLICT)
@@ -241,9 +276,13 @@ class ReservationRescheduleView(views.APIView):
             if reservation.service.requires_owner_confirmation
             else Reservation.CONFIRMED
         )
+        reservation.reminder_24h_sent_at = None
+        reservation.reminder_2h_sent_at = None
         reservation.save(update_fields=(
-            'scheduled_start', 'scheduled_end', 'status', 'updated_at',
+            'scheduled_start', 'scheduled_end', 'status',
+            'reminder_24h_sent_at', 'reminder_2h_sent_at', 'updated_at',
         ))
+        notify_after_commit(reservation, 'rescheduled')
         return Response(ApiResponse(
             success=True, code=200, data=ReservationSerializer(reservation).data,
         ))

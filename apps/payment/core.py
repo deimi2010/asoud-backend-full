@@ -23,6 +23,7 @@ from apps.users.models import User
 from apps.wallet.core import WalletCore
 from apps.wallet.models import Wallet
 from apps.reserve.models import Reservation
+from apps.reserve.lifecycle import notify_after_commit
 
 
 logger = logging.getLogger(__name__)
@@ -531,6 +532,12 @@ class PostPaymentCore:
             reservation.save(update_fields=(
                 'is_paid', 'status', 'confirmed_at', 'hold_expires_at', 'updated_at',
             ))
+            notify_after_commit(
+                reservation,
+                'requested'
+                if reservation.status == Reservation.PENDING_CONFIRMATION
+                else 'confirmed',
+            )
             return
 
         raise ValueError('Unsupported payment target')
