@@ -1,4 +1,5 @@
 from jdatetime import datetime as jdatetime
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.market.serializers.user_serializers import MarketListSerializer
@@ -223,6 +224,7 @@ class ReservationSerializer(serializers.ModelSerializer):
             return obj.reserve.service.market
         return None
 
+    @extend_schema_field(serializers.DictField(allow_null=True))
     def get_market(self, obj):
         market = self._market(obj)
         if market is None:
@@ -247,6 +249,7 @@ class ReservationSerializer(serializers.ModelSerializer):
             'telephone': contact.telephone if contact else None,
         }
 
+    @extend_schema_field(serializers.URLField())
     def get_appointment_url(self, obj):
         return f'https://asoud.ir/appointments/{obj.tracking_code}'
 
