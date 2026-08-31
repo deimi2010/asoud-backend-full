@@ -1,8 +1,10 @@
 from decimal import Decimal
+from datetime import timedelta
 from unittest.mock import Mock, patch
 
 from django.contrib.contenttypes.models import ContentType
 from django.test import RequestFactory, TestCase
+from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.cart.models import Order, OrderItem
@@ -15,6 +17,7 @@ from apps.payment.serializers.user import PaymentCreateSerializer
 from apps.payment.views import PaymentCreateView, PaymentVerifyView
 from apps.product.models import Product
 from apps.region.models import City, Country, Province
+from apps.reserve.models import Reservation, Service, Specialist
 from apps.users.models import User
 from apps.wallet.models import Wallet
 
@@ -154,6 +157,53 @@ class PaymentCreateSecurityTests(TestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn('amount', serializer.errors)
+
+    def test_appointment_payment_is_authoritative_and_confirms_the_hold(self):
+        self.product.type = Product.SERVICE
+        self.product.save(update_fields=('type', 'updated_at'))
+        service = Service.objects.create(
+            market=self.product.market,
+            product=self.product,
+            name=self.product.name,
+            payment_mode=Service.FIXED,
+            fixed_fee=Decimal('1000'),
+        )
+        specialist = Specialist.objects.create(
+            market=self.product.market,
+            user='Payment specialist',
+        )
+        specialist.services.add(service)
+        reservation = Reservation.objects.create(
+            user=self.user,
+            service=service,
+            specialist=specialist,
+            scheduled_start=timezone.now() + timedelta(days=1),
+            scheduled_end=timezone.now() + timedelta(days=1, minutes=30),
+            status=Reservation.HELD,
+            hold_expires_at=timezone.now() + timedelta(minutes=10),
+            amount_due=Decimal('1000'),
+            service_name_snapshot=service.name,
+        )
+
+        wrong = self.serializer(
+            target='reservation', target_id=str(reservation.id), amount='1'
+        )
+        correct = self.serializer(
+            target='reservation', target_id=str(reservation.id), amount='1000'
+        )
+        self.assertFalse(wrong.is_valid())
+        self.assertTrue(correct.is_valid(), correct.errors)
+
+        payment = Payment.objects.create(
+            user=self.user,
+            amount=Decimal('1000'),
+            target_content_type=ContentType.objects.get_for_model(Reservation),
+            target_id=reservation.id,
+        )
+        PostPaymentCore(self.user).payment_process(payment)
+        reservation.refresh_from_db()
+        self.assertTrue(reservation.is_paid)
+        self.assertEqual(reservation.status, Reservation.CONFIRMED)
 
     @patch.object(OrderItem, 'total_price', return_value=Decimal('1500.000'))
     def test_order_amount_is_derived_and_client_mismatch_is_rejected(self, _):

@@ -4,7 +4,8 @@ from apps.reserve.models import (
     Specialist,
     ReserveTime,
     DayOff,
-    Reservation
+    Reservation,
+    SpecialistTimeOff,
 )
 # Register your models here.
 
@@ -12,6 +13,9 @@ class ServiceAdmin(admin.ModelAdmin):
     list_display = [
         'name',
         'market',
+        'duration_minutes',
+        'payment_mode',
+        'is_active',
     ]
     search_fields = [
         'name'
@@ -24,6 +28,8 @@ class SpecialistAdmin(admin.ModelAdmin):
     list_display = [
         'user',
         'field',
+        'market',
+        'is_active',
     ]
     search_fields = [
         'user',
@@ -63,15 +69,26 @@ admin.site.register(DayOff, DayOffAdmin)
 class ReservationAdmin(admin.ModelAdmin):
     list_display = [
         'user',
-        'reserve',
+        'tracking_code',
+        'service',
         'specialist',
+        'scheduled_start',
+        'status',
         'is_paid'
     ]
     list_filter=[
-        'is_paid',
+        'is_paid', 'status',
     ]
     search_fields = [
-        'specialist',
+        'specialist__user',
+        'tracking_code',
+        'service_name_snapshot',
     ]
 
 admin.site.register(Reservation, ReservationAdmin)
+
+
+@admin.register(SpecialistTimeOff)
+class SpecialistTimeOffAdmin(admin.ModelAdmin):
+    list_display = ('specialist', 'date', 'start', 'end', 'reason')
+    list_filter = ('date',)

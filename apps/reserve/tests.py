@@ -1,13 +1,15 @@
-from datetime import date, time
+from datetime import date, time, timedelta
 from uuid import uuid4
 
 from django.test import TestCase
+from django.utils import timezone
 from django.urls import resolve
 from rest_framework.test import APIClient
 
 from apps.category.models import Category, Group, SubCategory
-from apps.market.models import Market, MarketMembership
+from apps.market.models import Market, MarketMembership, MarketSchedule
 from apps.reserve.models import DayOff, Reservation, ReserveTime, Service, Specialist
+from apps.reserve.services import available_slots, hold_reservation, market_weekday
 from apps.reserve.views.user.reservation import (
     ReservationCreateView,
     ReservationDetailView,
@@ -198,6 +200,37 @@ class ReservationIntegrityTests(TestCase):
         self.assertEqual(user_detail.status_code, 404)
         self.assertEqual(owner_detail.status_code, 404)
 
+    def test_owner_can_manage_modern_reservation_without_legacy_reserve_time(self):
+        self.specialist.market = self.market
+        self.specialist.save(update_fields=('market', 'updated_at'))
+        reservation = Reservation.objects.create(
+            user=self.buyer,
+            service=self.service,
+            specialist=self.specialist,
+            scheduled_start=timezone.now() + timedelta(days=2),
+            scheduled_end=timezone.now() + timedelta(days=2, minutes=30),
+            status=Reservation.PENDING_CONFIRMATION,
+            is_paid=True,
+            service_name_snapshot=self.service.name,
+        )
+        self.client.force_authenticate(self.owner)
+
+        listing = self.client.get('/api/v1/reservation/owner/reservation/')
+        confirmed = self.client.put(
+            f'/api/v1/reservation/owner/reservation/{reservation.id}/status',
+            {'status': Reservation.CONFIRMED},
+            format='json',
+        )
+        protected = self.client.delete(
+            f'/api/v1/reservation/owner/service/{self.service.id}/delete'
+        )
+
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.data['data'][0]['id'], str(reservation.id))
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertEqual(confirmed.data['data']['status'], Reservation.CONFIRMED)
+        self.assertEqual(protected.status_code, 409)
+
     def test_specialist_services_must_all_exist_and_be_owned(self):
         self.client.force_authenticate(self.owner)
         foreign_create = self.client.post(
@@ -363,7 +396,7 @@ class ReservationIntegrityTests(TestCase):
 
     def test_day_off_create_is_owned_and_idempotent(self):
         self.client.force_authenticate(self.owner)
-        payload = {'market': str(self.market.id), 'date': '2026-07-20'}
+        payload = {'market': str(self.market.id), 'date': '2030-07-20'}
         created = self.client.post(
             '/api/v1/reservation/owner/dayoff/create',
             payload,
@@ -376,7 +409,7 @@ class ReservationIntegrityTests(TestCase):
         )
         foreign = self.client.post(
             '/api/v1/reservation/owner/dayoff/create',
-            {'market': str(self.other_market.id), 'date': '2026-07-21'},
+            {'market': str(self.other_market.id), 'date': '2030-07-21'},
             format='json',
         )
 
@@ -384,3 +417,63 @@ class ReservationIntegrityTests(TestCase):
         self.assertEqual(repeated.status_code, 200)
         self.assertEqual(foreign.status_code, 404)
         self.assertEqual(DayOff.objects.count(), 1)
+
+    def test_dynamic_slots_use_shared_market_schedule_and_lock_capacity(self):
+        target_date = timezone.localdate() + timedelta(days=1)
+        MarketSchedule.objects.create(
+            market=self.market,
+            day_of_week=market_weekday(target_date),
+            start_time=time(9),
+            end_time=time(10),
+        )
+        self.service.duration_minutes = 30
+        self.service.payment_mode = Service.FIXED
+        self.service.fixed_fee = 1000
+        self.service.save(update_fields=(
+            'duration_minutes', 'payment_mode', 'fixed_fee', 'updated_at',
+        ))
+        self.specialist.market = self.market
+        self.specialist.save(update_fields=('market', 'updated_at'))
+
+        slots = available_slots(
+            service=self.service,
+            specialist=self.specialist,
+            day=target_date,
+        )
+        self.assertEqual(len(slots), 2)
+        reservation = hold_reservation(
+            user=self.buyer,
+            service=self.service,
+            specialist=self.specialist,
+            scheduled_start=slots[0]['start'],
+        )
+        self.assertEqual(reservation.status, Reservation.HELD)
+        self.assertEqual(reservation.amount_due, 1000)
+        with self.assertRaises(ValueError):
+            hold_reservation(
+                user=self.other_buyer,
+                service=self.service,
+                specialist=self.specialist,
+                scheduled_start=slots[0]['start'],
+            )
+
+    def test_store_day_off_removes_all_dynamic_slots(self):
+        target_date = timezone.localdate() + timedelta(days=1)
+        MarketSchedule.objects.create(
+            market=self.market,
+            day_of_week=market_weekday(target_date),
+            start_time=time(9),
+            end_time=time(10),
+        )
+        self.specialist.market = self.market
+        self.specialist.save(update_fields=('market', 'updated_at'))
+        DayOff.objects.create(market=self.market, date=target_date)
+
+        self.assertEqual(
+            available_slots(
+                service=self.service,
+                specialist=self.specialist,
+                day=target_date,
+            ),
+            [],
+        )

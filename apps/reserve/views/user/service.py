@@ -1,15 +1,19 @@
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
 from rest_framework import permissions, serializers, status, views
 from rest_framework.response import Response
 
 from apps.market.models import Market
+from apps.product.models import Product
 from apps.reserve.models import DayOff, ReserveTime, Service, Specialist
 from apps.reserve.serializers.user import (
+    AvailabilityQuerySerializer,
     DayoffListSerializer,
     ReserveTimeListSerializer,
     ServiceListSerializer,
     SpecialistListSerializer,
 )
+from apps.reserve.services import available_slots
 from utils.response import ApiResponse
 
 
@@ -34,8 +38,13 @@ class ServiceListView(views.APIView):
             status=Market.PUBLISHED,
         )
         services = (
-            Service.objects.filter(market=market)
-            .select_related('market', 'market__sub_category')
+            Service.objects.filter(market=market, is_active=True)
+            .filter(
+                Q(product__isnull=True)
+                | Q(product__type=Product.SERVICE, product__status=Product.PUBLISHED)
+            )
+            .distinct()
+            .select_related('market', 'market__sub_category', 'product')
             .prefetch_related('market__viewed_by')
         )
         if name := request.query_params.get('name'):
@@ -61,7 +70,9 @@ class SpecialistListView(views.APIView):
             id=query.validated_data['service'],
             market__status=Market.PUBLISHED,
         )
-        specialists = Specialist.objects.filter(services=service).distinct()
+        specialists = Specialist.objects.filter(
+            services=service, is_active=True,
+        ).distinct()
         return Response(
             ApiResponse(
                 success=True,
@@ -125,3 +136,45 @@ class DayOffListView(views.APIView):
                 data=DayoffListSerializer(days_off, many=True).data,
             )
         )
+
+
+class AvailabilityView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = AvailabilityQuerySerializer
+
+    def get(self, request):
+        query = AvailabilityQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        data = query.validated_data
+        service = get_object_or_404(
+            Service.objects.select_related('market', 'product'),
+            id=data['service'],
+            is_active=True,
+            market__status=Market.PUBLISHED,
+        )
+        specialist = get_object_or_404(
+            Specialist.objects.filter(services=service),
+            id=data['specialist'],
+            is_active=True,
+        )
+        slots = available_slots(
+            service=service,
+            specialist=specialist,
+            day=data['date'],
+        )
+        return Response(ApiResponse(success=True, code=200, data={
+            'date': data['date'].isoformat(),
+            'is_day_off': DayOff.objects.filter(
+                market=service.market, date=data['date'],
+            ).exists(),
+            'slots': [
+                {
+                    'start': item['start'].isoformat(),
+                    'end': item['end'].isoformat(),
+                    'capacity': item['capacity'],
+                    'remaining': item['remaining'],
+                    'available': item['available'],
+                }
+                for item in slots
+            ],
+        }))

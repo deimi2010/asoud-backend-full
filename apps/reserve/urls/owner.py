@@ -1,6 +1,7 @@
 from django.urls import path
 
 from apps.reserve.views.owner.service import (
+    AppointmentProductListView,
     ServiceCreateView,
     ServiceDetailView,
     ServiceListView,
@@ -28,12 +29,18 @@ from apps.reserve.views.owner.day_off import (
 )
 from apps.reserve.views.owner.reservation import (
     ReservationDetailView,
-    ReservationListView
+    ReservationListView,
+    ReservationStatusView,
+)
+from apps.reserve.views.owner.time_off import (
+    SpecialistTimeOffDeleteView,
+    SpecialistTimeOffListCreateView,
 )
 
 app_name = 'reserve_owner'
 
 urlpatterns = [
+    path('products/', AppointmentProductListView.as_view(), name='appointment-products'),
     path('service/',                ServiceListView.as_view(), name='service-list'),
     path('service/create',          ServiceCreateView.as_view(), name='service-create'),
     path('service/<uuid:pk>',        ServiceDetailView.as_view(), name='service-detail'),
@@ -55,7 +62,10 @@ urlpatterns = [
     path('dayoff/',                DayOffListView.as_view(), name='dayoff-list'),
     path('dayoff/create',          DayOffCreateView.as_view(), name='dayoff-create'),
     path('dayoff/<uuid:pk>/delete', DayOffDeleteView.as_view(), name='dayoff-delete'),
+    path('time-off/', SpecialistTimeOffListCreateView.as_view(), name='time-off-list-create'),
+    path('time-off/<uuid:pk>/delete', SpecialistTimeOffDeleteView.as_view(), name='time-off-delete'),
 
     path('reservation/',            ReservationListView.as_view(), name='reservation-list'),
     path('reservation/<uuid:pk>',    ReservationDetailView.as_view(), name='reservation-detail'),
+    path('reservation/<uuid:pk>/status', ReservationStatusView.as_view(), name='reservation-status'),
 ]

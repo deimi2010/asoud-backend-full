@@ -50,6 +50,7 @@ class PublicProductDetailSerializer(ProductDetailSerializer):
         fields = [
             'id',
             'name',
+            'type',
             'description',
             'technical_detail',
             'keywords',

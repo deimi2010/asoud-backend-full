@@ -7,6 +7,8 @@ from apps.advertise.models import Advertisement
 from apps.advertise.serializers import AdvertiseSerializer
 from apps.cart.models import Order
 from apps.market.models import Market
+from apps.reserve.models import Reservation
+from django.utils import timezone
 from decimal import Decimal
 
 from apps.core.money import MONEY_DECIMAL_PLACES, MONEY_MAX_DIGITS
@@ -43,6 +45,9 @@ class PaymentSerializer(serializers.ModelSerializer):
         elif target_model == Order:
             return {'id': str(obj.target_id)}
 
+        elif target_model == Reservation:
+            return {'id': str(obj.target_id), 'tracking_code': obj.target.tracking_code}
+
         return {'id': str(obj.target_id)}
 
     @extend_schema_field(serializers.CharField)
@@ -57,6 +62,9 @@ class PaymentSerializer(serializers.ModelSerializer):
 
         elif target_model == Order:
             return "order"
+
+        elif target_model == Reservation:
+            return "reservation"
 
         return "unknown"
             
@@ -96,6 +104,9 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
         elif target_model == Order:
             return {'id': str(obj.target_id)}
 
+        elif target_model == Reservation:
+            return {'id': str(obj.target_id), 'tracking_code': obj.target.tracking_code}
+
         return {'id': str(obj.target_id)}
     
     @extend_schema_field(serializers.DictField)
@@ -131,6 +142,9 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
         elif target_model == Order:
             return "order"
 
+        elif target_model == Reservation:
+            return "reservation"
+
         return "unknown"
         
 class PaymentCreateSerializer(serializers.Serializer):
@@ -140,7 +154,9 @@ class PaymentCreateSerializer(serializers.Serializer):
         min_value=Decimal('1'),
         required=False,
     )
-    target = serializers.ChoiceField(choices=('wallet', 'order', 'market_subscription'))
+    target = serializers.ChoiceField(
+        choices=('wallet', 'order', 'market_subscription', 'reservation')
+    )
     target_id = serializers.UUIDField()
     gateway = serializers.ChoiceField(choices=('zarinpal',))
 
@@ -203,6 +219,24 @@ class PaymentCreateSerializer(serializers.Serializer):
             if attrs['amount'] != resolved_amount:
                 raise serializers.ValidationError({'amount': 'Amount does not match the current order total.'})
 
+        elif attrs['target'] == 'reservation':
+            try:
+                target = Reservation.objects.select_related('service').get(
+                    id=attrs['target_id'],
+                    user=user,
+                    status=Reservation.HELD,
+                    is_paid=False,
+                    hold_expires_at__gt=timezone.now(),
+                )
+            except Reservation.DoesNotExist:
+                raise serializers.ValidationError(
+                    {'target_id': 'Payable appointment hold not found.'}
+                )
+            resolved_amount = Decimal(str(target.amount_due))
+            if resolved_amount <= 0:
+                raise serializers.ValidationError({'amount': 'Appointment has no payable amount.'})
+            if attrs.get('amount') is not None and attrs['amount'] != resolved_amount:
+                raise serializers.ValidationError({'amount': 'Amount does not match the appointment fee.'})
         else:
             try:
                 target = Market.objects.select_related('sub_category').get(

@@ -1,5 +1,6 @@
 from django.db import transaction
-from django.db.models import Count, F, Q
+from django.db.models import Q
+from django.db.models import Count, F
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, serializers, status, views
 from rest_framework.response import Response
@@ -65,9 +66,21 @@ class SpecialistCreateView(views.APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         services = _owned_services(data['services'], request.user)
+        market_ids = {service.market_id for service in services}
+        if len(market_ids) != 1:
+            raise serializers.ValidationError(
+                {'services': 'All specialist services must belong to one store.'}
+            )
+        market_id = market_ids.pop()
+        requested_market = data.get('market')
+        if requested_market is not None and requested_market.id != market_id:
+            raise serializers.ValidationError({'market': 'Store does not match the services.'})
         specialist = Specialist.objects.create(
+            market_id=market_id,
+            account=data.get('account'),
             user=data['user'],
             field=data.get('field'),
+            is_active=data.get('is_active', True),
         )
         specialist.services.set(services)
         specialist = _fully_owned_specialists(request.user).get(id=specialist.id)
@@ -125,12 +138,20 @@ class SpecialistUpdateView(views.APIView):
         data = serializer.validated_data
         if 'services' in data:
             services = _owned_services(data['services'], request.user)
-            historical_service_ids = set(
-                Reservation.objects.filter(specialist=specialist).values_list(
-                    'reserve__service_id',
-                    flat=True,
+            if len({service.market_id for service in services}) != 1:
+                raise serializers.ValidationError(
+                    {'services': 'All specialist services must belong to one store.'}
                 )
+            historical_service_ids = set(
+                Reservation.objects.filter(specialist=specialist)
+                .filter(Q(service__isnull=False) | Q(reserve__service__isnull=False))
+                .values_list('service_id', 'reserve__service_id')
             )
+            historical_service_ids = {
+                direct_id or legacy_id
+                for direct_id, legacy_id in historical_service_ids
+                if direct_id or legacy_id
+            }
             if not historical_service_ids.issubset({service.id for service in services}):
                 return Response(
                     ApiResponse(
@@ -141,11 +162,18 @@ class SpecialistUpdateView(views.APIView):
                     status=status.HTTP_409_CONFLICT,
                 )
             specialist.services.set(services)
+            specialist.market_id = services[0].market_id
+        if 'account' in data:
+            specialist.account = data['account']
         if 'user' in data:
             specialist.user = data['user']
         if 'field' in data:
             specialist.field = data['field']
-        specialist.save(update_fields=['user', 'field', 'updated_at'])
+        if 'is_active' in data:
+            specialist.is_active = data['is_active']
+        specialist.save(update_fields=[
+            'market', 'account', 'user', 'field', 'is_active', 'updated_at',
+        ])
         specialist = _fully_owned_specialists(request.user).get(id=specialist.id)
         return Response(
             ApiResponse(

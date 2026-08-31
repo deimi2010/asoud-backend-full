@@ -22,6 +22,7 @@ from apps.market.models import Market
 from apps.users.models import User
 from apps.wallet.core import WalletCore
 from apps.wallet.models import Wallet
+from apps.reserve.models import Reservation
 
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,7 @@ class PaymentCore:
         target = data.get('resolved_target')
         requested_amount = data.get('resolved_amount')
         if target is None or requested_amount is None or not isinstance(
-            target, (Wallet, Order, Market)
+            target, (Wallet, Order, Market, Reservation)
         ):
             return False, 'Invalid payment target'
 
@@ -196,6 +197,34 @@ class PaymentCore:
 
                 target.status = Order.PROCESSING
                 target.save(update_fields=['status', 'updated_at'])
+            elif isinstance(target, Reservation):
+                try:
+                    target = Reservation.objects.select_for_update().select_related('service').get(
+                        id=target.id,
+                        user=user,
+                        status=Reservation.HELD,
+                        is_paid=False,
+                        hold_expires_at__gt=timezone.now(),
+                    )
+                except Reservation.DoesNotExist:
+                    return False, 'Payable appointment hold not found'
+                existing_payment = Payment.objects.filter(
+                    user=user,
+                    target_content_type=target_content_type,
+                    target_id=target.id,
+                    status=Payment.PENDING,
+                ).first()
+                if existing_payment is not None:
+                    existing_gateway = Zarinpal.objects.filter(payment=existing_payment).first()
+                    if existing_gateway and existing_gateway.authority:
+                        return True, existing_gateway
+                    return False, 'Existing payment session requires reconciliation'
+                amount = Decimal(str(target.amount_due))
+                if amount != Decimal(str(requested_amount)):
+                    return False, 'Appointment fee changed; refresh before paying'
+                is_valid, validation_error = validate_payment_amount(amount)
+                if not is_valid:
+                    return False, validation_error
             elif isinstance(target, Market):
                 try:
                     target = Market.objects.select_for_update().get(
@@ -403,7 +432,13 @@ class PaymentCore:
                 payment.save(update_fields=['status', 'updated_at'])
         except Zarinpal.DoesNotExist:
             return False, 'No payment found'
-        except (Order.DoesNotExist, Wallet.DoesNotExist, Market.DoesNotExist, ValueError) as exc:
+        except (
+            Order.DoesNotExist,
+            Wallet.DoesNotExist,
+            Market.DoesNotExist,
+            Reservation.DoesNotExist,
+            ValueError,
+        ) as exc:
             logger.warning('Post-payment processing failed for authority %s: %s', authority, exc)
             return False, str(exc)
 
@@ -411,6 +446,17 @@ class PaymentCore:
 
     @staticmethod
     def _release_order(payment):
+        if (
+            payment.target_content_type_id
+            and payment.target_content_type.model_class() is Reservation
+        ):
+            Reservation.objects.select_for_update().filter(
+                id=payment.target_id,
+                user=payment.user,
+                status=Reservation.HELD,
+                is_paid=False,
+            ).update(status=Reservation.EXPIRED)
+            return
         if (
             payment.target_content_type_id
             and payment.target_content_type.model_class() is Order
@@ -463,6 +509,28 @@ class PostPaymentCore:
             )
             market.is_paid = True
             market.save(update_fields=['is_paid', 'updated_at'])
+            return
+
+        if target_model is Reservation:
+            reservation = Reservation.objects.select_for_update().select_related('service').get(
+                id=payment.target_id,
+                user=self.user,
+                status=Reservation.HELD,
+                is_paid=False,
+            )
+            reservation.is_paid = True
+            reservation.status = (
+                Reservation.PENDING_CONFIRMATION
+                if reservation.service.requires_owner_confirmation
+                else Reservation.CONFIRMED
+            )
+            reservation.confirmed_at = (
+                timezone.now() if reservation.status == Reservation.CONFIRMED else None
+            )
+            reservation.hold_expires_at = None
+            reservation.save(update_fields=(
+                'is_paid', 'status', 'confirmed_at', 'hold_expires_at', 'updated_at',
+            ))
             return
 
         raise ValueError('Unsupported payment target')
