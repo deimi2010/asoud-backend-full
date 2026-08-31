@@ -107,7 +107,9 @@ def hold_reservation(*, user, service, specialist, scheduled_start):
         is_active=True,
         market=service.market,
     )
-    service = Service.objects.select_for_update().select_related('product', 'market').get(
+    # Lock only the service row. PostgreSQL rejects FOR UPDATE when a
+    # select_related() outer join includes nullable relations such as product.
+    service = Service.objects.select_for_update().get(
         id=service.id,
         is_active=True,
     )

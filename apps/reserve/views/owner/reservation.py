@@ -91,9 +91,7 @@ class ReservationStatusView(views.APIView):
             id=pk,
         )
         reservation = get_object_or_404(
-            Reservation.objects.select_for_update().select_related(
-                'service', 'specialist',
-            ),
+            Reservation.objects.select_for_update(),
             id=authorized_id,
         )
         target = serializer.validated_data['status']

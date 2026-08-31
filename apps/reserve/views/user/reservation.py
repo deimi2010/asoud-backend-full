@@ -173,7 +173,7 @@ class ReservationCancelView(views.APIView):
         serializer = ReservationCancelSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         reservation = get_object_or_404(
-            Reservation.objects.select_for_update().select_related('service'),
+            Reservation.objects.select_for_update(),
             id=pk,
             user=request.user,
             status__in=(
@@ -216,7 +216,7 @@ class ReservationRescheduleView(views.APIView):
         serializer = ReservationRescheduleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         reservation = get_object_or_404(
-            Reservation.objects.select_for_update().select_related('service', 'specialist'),
+            Reservation.objects.select_for_update(),
             id=pk,
             user=request.user,
             service__isnull=False,

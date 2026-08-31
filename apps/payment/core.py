@@ -199,7 +199,7 @@ class PaymentCore:
                 target.save(update_fields=['status', 'updated_at'])
             elif isinstance(target, Reservation):
                 try:
-                    target = Reservation.objects.select_for_update().select_related('service').get(
+                    target = Reservation.objects.select_for_update().get(
                         id=target.id,
                         user=user,
                         status=Reservation.HELD,
@@ -512,7 +512,7 @@ class PostPaymentCore:
             return
 
         if target_model is Reservation:
-            reservation = Reservation.objects.select_for_update().select_related('service').get(
+            reservation = Reservation.objects.select_for_update().get(
                 id=payment.target_id,
                 user=self.user,
                 status=Reservation.HELD,
