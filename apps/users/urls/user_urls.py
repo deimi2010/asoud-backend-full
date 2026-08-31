@@ -6,7 +6,9 @@ from apps.users.views.user_views import (
     BankInfoCreateView, BankInfoUpdateView,
     BankInfoListView, BankInfoDeleteView,
     BankInfoDetailView, BanksListView)
-from apps.users.views.user_views import SelfProfileView
+from apps.users.views.user_views import (
+    SelfDocumentDownloadView, SelfDocumentView, SelfProfileSubmitView, SelfProfileView,
+)
 from apps.core.bootstrap import AppBootstrapView
 
 
@@ -18,6 +20,9 @@ urlpatterns = [
     path('logout/', LogoutAPIView.as_view(), name='logout'),
     path('ws-ticket/', WebSocketTicketAPIView.as_view(), name='ws-ticket'),
     path('profile/', SelfProfileView.as_view(), name='self-profile'),
+    path('profile/documents/', SelfDocumentView.as_view(), name='self-documents'),
+    path('profile/documents/<uuid:pk>/download/', SelfDocumentDownloadView.as_view(), name='self-document-download'),
+    path('profile/submit/', SelfProfileSubmitView.as_view(), name='self-profile-submit'),
     path('bootstrap/', AppBootstrapView.as_view(), name='app-bootstrap'),
     path('bank-info/list/', BanksListView.as_view(), name='banks-list'),
     path('bank/info/create/', BankInfoCreateView.as_view(), name= 'bank-create'),

@@ -1,4 +1,3 @@
-import json
 from rest_framework import serializers
 from apps.sms.models import (
     Line, 

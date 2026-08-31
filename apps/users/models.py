@@ -1,6 +1,8 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import AbstractUser
+from pathlib import Path
+from uuid import uuid4
 
 from .managers import CustomUserManager
 from apps.base.models import BaseModel
@@ -82,6 +84,32 @@ class User(AbstractUser):
         return self.is_authenticated and self.is_active
 
 class UserProfile(BaseModel):
+    PENDING = 'pending'
+    NEEDS_EDITING = 'needs_editing'
+    APPROVED = 'approved'
+    REJECTED = 'rejected'
+    INACTIVE = 'inactive'
+    STATUS_CHOICES = (
+        (PENDING, _('Pending review')),
+        (NEEDS_EDITING, _('Needs editing')),
+        (APPROVED, _('Approved')),
+        (REJECTED, _('Rejected')),
+        (INACTIVE, _('Inactive')),
+    )
+
+    PHONE_UNCHECKED = 'unchecked'
+    PHONE_POSSESSION_VERIFIED = 'possession_verified'
+    PHONE_OWNER_MATCHED = 'owner_matched'
+    PHONE_OWNER_MISMATCHED = 'owner_mismatched'
+    PHONE_MANUAL_REVIEW = 'manual_review'
+    PHONE_STATUS_CHOICES = (
+        (PHONE_UNCHECKED, _('Unchecked')),
+        (PHONE_POSSESSION_VERIFIED, _('Possession verified by OTP')),
+        (PHONE_OWNER_MATCHED, _('Legal owner matched')),
+        (PHONE_OWNER_MISMATCHED, _('Legal owner mismatched')),
+        (PHONE_MANUAL_REVIEW, _('Manual review required')),
+    )
+
     user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
@@ -102,7 +130,7 @@ class UserProfile(BaseModel):
         verbose_name=_('Birth date'),
     )
     iban_number = models.CharField(
-        max_length=20,
+        max_length=26,
         blank=True,
         null=True,
         verbose_name=_('Iban number'),
@@ -112,6 +140,27 @@ class UserProfile(BaseModel):
         blank=True,
         null=True,
         verbose_name=_('Image'),
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=PENDING,
+        db_index=True,
+    )
+    phone_ownership_status = models.CharField(
+        max_length=24,
+        choices=PHONE_STATUS_CHOICES,
+        default=PHONE_UNCHECKED,
+    )
+    review_note = models.TextField(blank=True, default='')
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        User,
+        related_name='reviewed_user_profiles',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
     )
 
     class Meta:
@@ -123,23 +172,73 @@ class UserProfile(BaseModel):
         return self.user.mobile_number
 
 
+def upload_identity_document(instance, filename):
+    extension = Path(filename).suffix.lower()[:10]
+    return f'private/user/{instance.user_id}/{instance.document_type}/{uuid4().hex}{extension}'
+
+
 class UserDocument(BaseModel):
+    NATIONAL_CARD_FRONT = 'national_card_front'
+    NATIONAL_CARD_BACK = 'national_card_back'
+    BIRTH_CERTIFICATE = 'birth_certificate'
+    SELFIE_WITH_ID = 'selfie_with_id'
+    BANK_OWNERSHIP = 'bank_ownership'
+    ACTIVITY_LICENSE = 'activity_license'
+    DOCUMENT_TYPE_CHOICES = (
+        (NATIONAL_CARD_FRONT, _('National card front')),
+        (NATIONAL_CARD_BACK, _('National card back')),
+        (BIRTH_CERTIFICATE, _('Birth certificate')),
+        (SELFIE_WITH_ID, _('Selfie with identity document')),
+        (BANK_OWNERSHIP, _('Bank account ownership evidence')),
+        (ACTIVITY_LICENSE, _('Activity license or supporting document')),
+    )
+
+    PENDING = 'pending'
+    APPROVED = 'approved'
+    REJECTED = 'rejected'
+    STATUS_CHOICES = (
+        (PENDING, _('Pending review')),
+        (APPROVED, _('Approved')),
+        (REJECTED, _('Rejected')),
+    )
+
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
         verbose_name=_('User document'),
     )
     file = models.FileField(
-        upload_to='user/document/',
+        upload_to=upload_identity_document,
         blank=True,
         null=True,
         verbose_name=_('Market file'),
+    )
+    document_type = models.CharField(
+        max_length=32,
+        choices=DOCUMENT_TYPE_CHOICES,
+        default=ACTIVITY_LICENSE,
+    )
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=PENDING)
+    review_note = models.TextField(blank=True, default='')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        User,
+        related_name='reviewed_user_documents',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
     )
 
     class Meta:
         db_table = 'user_document'
         verbose_name = _('User document')
         verbose_name_plural = _('User documents')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('user', 'document_type'),
+                name='unique_user_identity_document_type',
+            ),
+        ]
 
     def __str__(self):
         return self.user.mobile_number

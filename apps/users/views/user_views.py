@@ -2,7 +2,7 @@ import hashlib
 import logging
 import secrets
 
-from rest_framework import views, status, permissions
+from rest_framework import parsers, views, status, permissions
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.status import HTTP_200_OK
@@ -10,7 +10,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ValidationError
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from utils.response import ApiResponse
-from apps.users.models import BankInfo, User, UserBankInfo, UserProfile
+from apps.users.models import BankInfo, User, UserBankInfo, UserDocument, UserProfile
 from apps.sms.sms_core import SMSCoreHandler
 from apps.users import serializers
 from django.core.cache import cache
@@ -18,6 +18,8 @@ from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.db import IntegrityError, transaction
 from django.db.models import Q
+from django.utils import timezone
+from django.http import FileResponse
 from redis import RedisError
 
 from apps.core.rate_limit import AtomicRateThrottle
@@ -38,6 +40,8 @@ class SelfProfileView(views.APIView):
         return {
             "id": user.id,
             "mobile_number": user.mobile_number,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
             "profile": serializers.UserProfileSerializer(profile).data
             if profile
             else None,
@@ -63,13 +67,11 @@ class SelfProfileView(views.APIView):
     )
     @transaction.atomic
     def put(self, request):
-        if "iban_number" in request.data:
-            raise ValidationError(
-                {
-                    "iban_number": "IBAN updates are unavailable until schema reconciliation."
-                }
-            )
         user = User.objects.select_for_update().get(id=request.user.id)
+        for field in ('first_name', 'last_name'):
+            if field in request.data:
+                setattr(user, field, str(request.data[field]).strip()[:150])
+        user.save(update_fields=('first_name', 'last_name'))
         profile = UserProfile.objects.select_for_update().filter(user=user).first()
         if profile is None and not request.data.get("national_code"):
             raise ValidationError(
@@ -89,6 +91,88 @@ class SelfProfileView(views.APIView):
                 data=self._response_data(user),
             )
         )
+
+
+class SelfDocumentView(views.APIView):
+    permission_classes = (permissions.IsAuthenticated,)
+    parser_classes = (parsers.MultiPartParser, parsers.FormParser)
+
+    def get(self, request):
+        documents = UserDocument.objects.filter(user=request.user).order_by('document_type')
+        data = serializers.UserDocumentSerializer(
+            documents, many=True, context={'request': request},
+        ).data
+        return Response(ApiResponse(success=True, code=200, data=data))
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = serializers.UserDocumentSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        document, _ = UserDocument.objects.update_or_create(
+            user=request.user,
+            document_type=serializer.validated_data['document_type'],
+            defaults={'file': serializer.validated_data['file'], 'status': UserDocument.PENDING,
+                      'review_note': '', 'reviewed_at': None, 'reviewed_by': None},
+        )
+        UserProfile.objects.filter(user=request.user).exclude(status=UserProfile.PENDING).update(
+            status=UserProfile.NEEDS_EDITING, review_note='مدرک جدید برای بررسی بارگذاری شد.',
+        )
+        data = serializers.UserDocumentSerializer(document, context={'request': request}).data
+        return Response(ApiResponse(success=True, code=201, data=data), status=status.HTTP_201_CREATED)
+
+    @transaction.atomic
+    def delete(self, request):
+        deleted, _ = UserDocument.objects.filter(
+            user=request.user, document_type=request.data.get('document_type'),
+        ).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT if deleted else status.HTTP_404_NOT_FOUND)
+
+
+class SelfProfileSubmitView(views.APIView):
+    permission_classes = (permissions.IsAuthenticated,)
+
+    @transaction.atomic
+    def post(self, request):
+        profile = UserProfile.objects.select_for_update().filter(user=request.user).first()
+        if not profile:
+            raise ValidationError({'profile': 'ابتدا اطلاعات پروفایل را تکمیل کنید.'})
+        missing_fields = [name for name in ('national_code', 'birth_date', 'iban_number', 'address')
+                          if not getattr(profile, name)]
+        if not request.user.first_name or not request.user.last_name:
+            missing_fields.extend(('first_name', 'last_name'))
+        present = set(UserDocument.objects.filter(user=request.user, file__isnull=False)
+                      .values_list('document_type', flat=True))
+        required = {choice[0] for choice in UserDocument.DOCUMENT_TYPE_CHOICES}
+        if missing_fields or required - present:
+            raise ValidationError({'missing_fields': missing_fields,
+                                   'missing_documents': sorted(required - present)})
+        profile.status = UserProfile.PENDING
+        profile.submitted_at = timezone.now()
+        profile.review_note = ''
+        if profile.phone_ownership_status == UserProfile.PHONE_UNCHECKED:
+            profile.phone_ownership_status = UserProfile.PHONE_POSSESSION_VERIFIED
+        from apps.users.identity import check_phone_ownership
+        profile.phone_ownership_status = check_phone_ownership(
+            national_code=profile.national_code,
+            mobile_number=request.user.mobile_number,
+        )
+        profile.save(update_fields=('status', 'submitted_at', 'review_note',
+                                    'phone_ownership_status', 'updated_at'))
+        data = serializers.UserProfileSerializer(profile, context={'request': request}).data
+        return Response(ApiResponse(success=True, code=200, data=data))
+
+
+class SelfDocumentDownloadView(views.APIView):
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request, pk):
+        document = UserDocument.objects.filter(id=pk, user=request.user).first()
+        if not document or not document.file:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        response = FileResponse(document.file.open('rb'), as_attachment=True)
+        response['Cache-Control'] = 'private, no-store'
+        response['X-Content-Type-Options'] = 'nosniff'
+        return response
 
 
 def _otp_cache_key(mobile_number):

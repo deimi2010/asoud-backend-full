@@ -12,6 +12,8 @@ from apps.market.serializers.membership import (
     MarketMembershipUpdateSerializer,
 )
 from apps.users.models import User
+from apps.users.models import UserDocument, UserProfile
+from django.utils import timezone
 
 
 def _administered_markets(user):
@@ -60,7 +62,10 @@ class MarketMembershipListCreateView(views.APIView):
             user=colleague,
             defaults={
                 'role': serializer.validated_data['role'],
-                'is_active': True,
+                'permissions': serializer.validated_data.get('permissions', []),
+                'status': MarketMembership.PROFILE_INCOMPLETE,
+                'is_active': False,
+                'invited_by': request.user,
             },
         )
         return Response(
@@ -86,8 +91,31 @@ class MarketMembershipDetailView(views.APIView):
             id=pk,
         )
         membership.role = serializer.validated_data['role']
-        membership.is_active = True
-        membership.save(update_fields=('role', 'is_active', 'updated_at'))
+        if 'permissions' in serializer.validated_data:
+            membership.permissions = serializer.validated_data['permissions']
+        enable = serializer.validated_data.get('is_active')
+        if enable is False:
+            membership.is_active = False
+            membership.status = MarketMembership.OWNER_DISABLED
+        elif enable is True:
+            profile_approved = UserProfile.objects.filter(
+                user=membership.user, status=UserProfile.APPROVED,
+                phone_ownership_status=UserProfile.PHONE_OWNER_MATCHED,
+            ).exists()
+            required = len(UserDocument.DOCUMENT_TYPE_CHOICES)
+            documents_approved = UserDocument.objects.filter(
+                user=membership.user, status=UserDocument.APPROVED,
+            ).values('document_type').distinct().count() == required
+            if not (profile_approved and documents_approved):
+                membership.status = MarketMembership.PROFILE_INCOMPLETE
+                membership.is_active = False
+            else:
+                membership.status = MarketMembership.ADMIN_REVIEW
+                membership.owner_approved_at = timezone.now()
+                membership.is_active = False
+        membership.save(update_fields=(
+            'role', 'permissions', 'status', 'is_active', 'owner_approved_at', 'updated_at',
+        ))
         return Response(MarketMembershipSerializer(membership).data)
 
     @extend_schema(request=None, responses={204: None}, tags=['Store membership'])
@@ -98,5 +126,6 @@ class MarketMembershipDetailView(views.APIView):
             id=pk,
         )
         membership.is_active = False
-        membership.save(update_fields=('is_active', 'updated_at'))
+        membership.status = MarketMembership.OWNER_DISABLED
+        membership.save(update_fields=('is_active', 'status', 'updated_at'))
         return Response(status=status.HTTP_204_NO_CONTENT)

@@ -1,4 +1,5 @@
 from apps.base.admin import admin, BaseAdmin, BaseTabularInline
+from django.utils import timezone
 
 from .models import (
     Market,
@@ -15,6 +16,7 @@ from .models import (
     MarketRevision,
     MarketGatewayConnection,
     MarketShippingMethod,
+    MarketMembership,
 )
 
 # Register your models here.
@@ -231,3 +233,21 @@ class MarketDiscountAdmin(BaseAdmin):
 
 
 admin.site.register(MarketDiscount, MarketDiscountAdmin)
+
+
+@admin.register(MarketMembership)
+class MarketMembershipAdmin(BaseAdmin):
+    list_display = ('market', 'user', 'role', 'status', 'is_active')
+    list_filter = ('status', 'role', 'is_active')
+    search_fields = ('market__name', 'user__mobile_number')
+    actions = ('approve_memberships',)
+
+    @admin.action(description='تأیید و فعال‌سازی همکاران انتخاب‌شده')
+    def approve_memberships(self, request, queryset):
+        queryset.filter(status=MarketMembership.ADMIN_REVIEW).update(
+            status=MarketMembership.ACTIVE,
+            is_active=True,
+            approved_by=request.user,
+            admin_approved_at=timezone.now(),
+            review_note='',
+        )

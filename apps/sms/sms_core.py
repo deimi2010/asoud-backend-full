@@ -14,10 +14,12 @@ class SMSCoreHandler:
         if env_key:
             return env_key
         # Development mock structure: settings.SMS_API = { 'API_KEY': 'development-key', ... }
-        try:
-            return getattr(settings, 'SMS_API', {}).get('API_KEY')  # type: ignore[arg-type]
-        except Exception:
-            return ''
+        configured = getattr(settings, 'SMS_API', '')
+        if isinstance(configured, str):
+            return configured.strip()
+        if isinstance(configured, dict):
+            return str(configured.get('API_KEY') or '').strip()
+        return ''
 
     @staticmethod
     def _should_mock_send() -> bool:
@@ -158,5 +160,4 @@ class SMSCoreHandler:
 #         }
 #     ]
 # }
-
 

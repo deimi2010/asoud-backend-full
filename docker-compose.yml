@@ -88,6 +88,28 @@ services:
       retries: 20
     restart: unless-stopped
 
+  sms-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime-dev-ml
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.migration_dev
+      DATABASE_NAME: asoud_feature_migrations
+      DATABASE_USERNAME: asoud
+      DATABASE_PASSWORD: ""
+      DATABASE_HOST: db
+      DATABASE_PORT: "5432"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    command: ["python", "manage.py", "process_sms_queue", "--interval", "2"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:

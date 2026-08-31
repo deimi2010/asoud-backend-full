@@ -92,6 +92,23 @@ services:
         max-size: 20m
         max-file: "5"
 
+  sms-worker:
+    image: ${BACKEND_IMAGE:?set an immutable backend image digest}
+    init: true
+    restart: unless-stopped
+    environment: *backend-environment
+    secrets: *backend-secrets
+    command: ["python", "manage.py", "process_sms_queue", "--interval", "5"]
+    volumes:
+      - media_data:/app/media
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /app/logs:size=16m,uid=10001,gid=10001,mode=0750
+    pids_limit: 128
+    <<: *container-security
+    networks: [app]
+
   frontend:
     image: ${FRONTEND_IMAGE:?set an immutable frontend image digest}
     restart: unless-stopped

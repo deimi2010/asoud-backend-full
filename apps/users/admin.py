@@ -1,5 +1,6 @@
 from apps.base.admin import admin, BaseTabularInline
 from django.template.defaultfilters import date as admin_dateformat
+from django.utils import timezone
 
 from .models import User, UserProfile, UserDocument, BankInfo, UserBankInfo
 
@@ -8,6 +9,7 @@ from .models import User, UserProfile, UserDocument, BankInfo, UserBankInfo
 
 class UserProfileTabularInline(BaseTabularInline):
     model = UserProfile
+    fk_name = 'user'
 
     fields = (
         'address',
@@ -15,14 +17,18 @@ class UserProfileTabularInline(BaseTabularInline):
         'birth_date',
         'iban_number',
         'picture',
+        'status',
+        'phone_ownership_status',
+        'review_note',
     )
 
 
 class UserDocumentTabularInline(BaseTabularInline):
     model = UserDocument
+    fk_name = 'user'
 
     fields = (
-        'file',
+        'document_type', 'file', 'status', 'review_note',
     )
 
 
@@ -79,3 +85,40 @@ class UserBankInfoAdmin(admin.ModelAdmin):
 
 admin.site.register(BankInfo, BankInfoAdmin)
 admin.site.register(UserBankInfo, UserBankInfoAdmin)
+
+
+@admin.action(description='تأیید احراز هویت و تطبیق مالکیت شماره')
+def approve_profiles(modeladmin, request, queryset):
+    queryset.update(
+        status=UserProfile.APPROVED,
+        phone_ownership_status=UserProfile.PHONE_OWNER_MATCHED,
+        reviewed_by=request.user,
+        reviewed_at=timezone.now(),
+        review_note='',
+    )
+
+
+@admin.register(UserProfile)
+class UserProfileReviewAdmin(admin.ModelAdmin):
+    list_display = ('user', 'national_code', 'status', 'phone_ownership_status', 'submitted_at')
+    list_filter = ('status', 'phone_ownership_status')
+    search_fields = ('user__mobile_number', 'national_code')
+    actions = (approve_profiles,)
+
+
+@admin.action(description='تأیید مدارک انتخاب‌شده')
+def approve_documents(modeladmin, request, queryset):
+    queryset.update(
+        status=UserDocument.APPROVED,
+        reviewed_by=request.user,
+        reviewed_at=timezone.now(),
+        review_note='',
+    )
+
+
+@admin.register(UserDocument)
+class UserDocumentReviewAdmin(admin.ModelAdmin):
+    list_display = ('user', 'document_type', 'status', 'created_at')
+    list_filter = ('document_type', 'status')
+    search_fields = ('user__mobile_number',)
+    actions = (approve_documents,)

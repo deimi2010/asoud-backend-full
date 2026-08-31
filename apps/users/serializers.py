@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from apps.users.models import BankInfo, User, UserBankInfo, UserProfile
+from apps.users.models import BankInfo, User, UserBankInfo, UserDocument, UserProfile
 
 
 def _valid_card_checksum(value):
@@ -199,6 +199,8 @@ class PublicUserBankInfoSerializer(serializers.ModelSerializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    documents = serializers.SerializerMethodField()
+
     class Meta:
         model = UserProfile
         fields = (
@@ -208,8 +210,16 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "birth_date",
             "iban_number",
             "picture",
+            "status",
+            "phone_ownership_status",
+            "review_note",
+            "submitted_at",
+            "documents",
         )
-        read_only_fields = ("id",)
+        read_only_fields = fields
+
+    def get_documents(self, obj):
+        return UserDocumentSerializer(obj.user.userdocument_set.all(), many=True).data
 
     def validate_national_code(self, value):
         if len(value) != 10 or not value.isascii() or not value.isdecimal():
@@ -222,7 +232,7 @@ class SelfProfileUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserProfile
-        fields = ("address", "national_code", "birth_date", "picture")
+        fields = ("address", "national_code", "birth_date", "iban_number", "picture")
         extra_kwargs = {"national_code": {"required": False}}
 
     def validate_national_code(self, value):
@@ -230,10 +240,45 @@ class SelfProfileUpdateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("National code must contain 10 digits.")
         return value
 
+    def validate_iban_number(self, value):
+        if not value:
+            return value
+        normalized = value.replace(' ', '').upper()
+        if len(normalized) != 26 or not normalized.startswith('IR') or not normalized[2:].isdigit():
+            raise serializers.ValidationError('IBAN must contain IR followed by 24 digits.')
+        if not _valid_iranian_iban_checksum(normalized):
+            raise serializers.ValidationError('IBAN checksum is invalid.')
+        return normalized
+
+
+class UserDocumentSerializer(serializers.ModelSerializer):
+    download_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserDocument
+        fields = ('id', 'document_type', 'file', 'download_url', 'status', 'review_note', 'created_at')
+        read_only_fields = ('id', 'status', 'review_note', 'created_at')
+        extra_kwargs = {'file': {'write_only': True}}
+
+    def get_download_url(self, obj):
+        request = self.context.get('request')
+        path = f'/api/v1/user/profile/documents/{obj.id}/download/'
+        return request.build_absolute_uri(path) if request else path
+
+    def validate_file(self, value):
+        if value.size > 8 * 1024 * 1024:
+            raise serializers.ValidationError('حداکثر حجم هر مدرک ۸ مگابایت است.')
+        extension = value.name.lower().rsplit('.', 1)[-1] if '.' in value.name else ''
+        if extension not in {'jpg', 'jpeg', 'png', 'pdf'}:
+            raise serializers.ValidationError('فرمت مجاز JPG، PNG یا PDF است.')
+        return value
+
 
 class SelfProfileDataSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     mobile_number = serializers.CharField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
     profile = UserProfileSerializer(allow_null=True)
 
 

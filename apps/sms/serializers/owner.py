@@ -1,180 +1,122 @@
-import json
+from urllib.parse import urlparse
+
 from rest_framework import serializers
-from apps.sms.models import (
-    Line, 
-    Template,
-    BulkSms,
-    PatternSms
-)
+
+from apps.sms.models import BulkSms, Contact, Line, SmsCampaign, SmsRecipient, SmsTariff, Template
+
+
+def normalize_mobile(value):
+    value = str(value or '').strip().replace(' ', '').replace('-', '')
+    if value.startswith('+98'):
+        value = f'0{value[3:]}'
+    elif value.startswith('98') and len(value) == 12:
+        value = f'0{value[2:]}'
+    if len(value) != 11 or not value.isascii() or not value.isdecimal() or not value.startswith('09'):
+        raise serializers.ValidationError('شماره همراه باید ۱۱ رقم و با 09 شروع شود.')
+    return value
 
 
 class LineListSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(read_only=True)
-    
     class Meta:
         model = Line
-        fields = ['id', 'number', 'estimated_cost']
+        fields = ('id', 'number', 'estimated_cost')
 
-class TemplateListSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(read_only=True)
-
-    class Meta:
-        model = Template
-        fields = ['id', 'template_id', 'content', 'variables']
 
 class BulkSmsCreateSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(read_only=True)
-    cost = serializers.FloatField(read_only=True)
-    actual_cost = serializers.FloatField(read_only=True)
-    status = serializers.CharField(read_only=True)
-    packId = serializers.CharField(read_only=True)
-    
+    """Read-only billing/provider fields retained for legacy client safety."""
+
     class Meta:
         model = BulkSms
-        exclude = ['user', 'message_ids']
-    
-    def to_payload(self, validated_data: dict):
-        """Convert validated data to SMS API payload format"""
-        return {
-            "lineNumber": validated_data['line'].number,
-            "messageText": validated_data['content'],
-            "mobiles": validated_data['to']
-        }
+        exclude = ('user', 'message_ids')
+        read_only_fields = ('cost', 'actual_cost', 'status', 'packId')
 
-class BulkSmsViewSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(read_only=True)
+
+class TemplateListSerializer(serializers.ModelSerializer):
     class Meta:
-        model = BulkSms
-        fields = [
-            'id',
-            'line', 
-            'content',
-            'to'
-        ]
+        model = Template
+        fields = (
+            'id', 'template_id', 'title', 'category', 'content', 'variables',
+            'approval_status', 'is_public', 'review_note', 'is_active',
+        )
+        read_only_fields = fields
 
-class PatternSmsCreateSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(read_only=True)
-    template = serializers.UUIDField()
-    cost = serializers.FloatField(read_only=True)
-    actual_cost = serializers.FloatField(read_only=True)
-    status = serializers.CharField(read_only=True)
-    variables = serializers.JSONField(required=True)
+
+class TemplateCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Template
+        fields = ('id', 'title', 'category', 'content')
+        read_only_fields = ('id',)
+
+    def create(self, validated_data):
+        return Template.objects.create(
+            owner=self.context['request'].user,
+            variables=[], estimated_cost=0, approval_status='pending',
+            is_public=False, is_active=True, **validated_data,
+        )
+
+
+class ContactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Contact
+        fields = ('id', 'name', 'mobile_number', 'source', 'has_consent')
+        read_only_fields = ('id',)
+
+    def validate_mobile_number(self, value):
+        return normalize_mobile(value)
+
+
+class RecipientInputSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=64, required=False, allow_blank=True, default='')
+    mobile_number = serializers.CharField(max_length=15)
+
+    def validate_mobile_number(self, value):
+        return normalize_mobile(value)
+
+
+class CampaignCreateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=100)
+    market = serializers.UUIDField(required=False, allow_null=True)
+    template = serializers.UUIDField(required=False, allow_null=True)
+    line = serializers.UUIDField()
+    message = serializers.CharField(max_length=2000)
+    link = serializers.URLField(max_length=500, required=False, allow_blank=True, default='')
+    recipients = RecipientInputSerializer(many=True, min_length=1, max_length=10000)
+    scheduled_at = serializers.DateTimeField(required=False, allow_null=True)
+
+    def validate_link(self, value):
+        if not value:
+            return value
+        parsed = urlparse(value)
+        hostname = (parsed.hostname or '').lower().rstrip('.')
+        if parsed.scheme != 'https' or not (hostname == 'asoud.ir' or hostname.endswith('.asoud.ir')):
+            raise serializers.ValidationError('لینک باید HTTPS و متعلق به asoud.ir یا زیردامنه آن باشد.')
+        return value
+
+    def validate_recipients(self, value):
+        return list({item['mobile_number']: item for item in value}.values())
+
+
+class SmsRecipientSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SmsRecipient
+        fields = ('id', 'name', 'mobile_number', 'status', 'actual_cost', 'error_message')
+
+
+class SmsCampaignSerializer(serializers.ModelSerializer):
+    recipients = SmsRecipientSerializer(many=True, read_only=True)
+    template_title = serializers.CharField(source='template.title', read_only=True, allow_null=True)
 
     class Meta:
-        model = PatternSms
-        exclude = ['user', 'message_id']
+        model = SmsCampaign
+        fields = (
+            'id', 'title', 'market', 'template', 'template_title', 'message', 'link',
+            'status', 'recipient_count', 'segment_count', 'estimated_cost',
+            'reserved_cost', 'actual_cost', 'scheduled_at', 'sent_at',
+            'failure_reason', 'created_at', 'recipients',
+        )
 
-    def to_payload(self, validated_data: dict):
-        try:
-            template = Template.objects.get(id=validated_data['template'])
-        except Template.DoesNotExist:
-            raise Exception('Template Not Found')
-        
-        # check variables required for the template
-        variables = template.variables
-        needed_variables = list( variables.keys() )
-        input_variables = [v['name'] for v in validated_data['variables']]
 
-        if len(needed_variables) != len(input_variables):
-            raise Exception('Extra/Less Variables Received')
-        
-        errors = {}
-        for v in needed_variables:
-            if v not in input_variables:
-                errors['v'] = "Not Provided"
-
-        if errors:
-            raise Exception(json.dumps(errors))
-        
-        # for v in validated_data['variables']:
-        #     v['name'] = v['name'].upper()
-        
-        return [
-            {
-                "Mobile": mobile,
-                "TemplateId": int(template.template_id),
-                "Parameters": validated_data['variables']
-            }  
-            for mobile in validated_data['to']
-        ]
-
-class PatternSmsViewSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(read_only=True)
-    template = serializers.SerializerMethodField()
-    
+class SmsTariffSerializer(serializers.ModelSerializer):
     class Meta:
-        model = PatternSms
-        fields = [
-            'id',
-            'template', 
-            'to',
-            'variables',
-            'cost',
-            'actual_cost',
-            'status',
-            'created_at'
-        ]
-    
-    def get_template(self, obj):
-        if obj.template:
-            return {
-                'id': obj.template.id,
-                'template_id': obj.template.template_id,
-                'content': obj.template.content
-            }
-        return None
-
-
-class SmsListSerializer(serializers.ModelSerializer):
-    sms_type = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = BulkSms
-        fields = [
-            'id',
-            'line',
-            'content',
-            'to',
-            'cost',
-            'actual_cost', 
-            'status',
-            'sms_type',
-            'created_at'
-        ]
-    
-    def get_sms_type(self, obj):
-        return 'bulk'
-
-
-class SmsHistorySerializer(serializers.ModelSerializer):
-    """Combined serializer for SMS history including both bulk and pattern SMS"""
-    sms_type = serializers.CharField(read_only=True)
-    content_preview = serializers.SerializerMethodField()
-    recipient_count = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = BulkSms  # Base model, will be extended
-        fields = [
-            'id',
-            'sms_type',
-            'content_preview',
-            'recipient_count',
-            'cost',
-            'actual_cost',
-            'status',
-            'created_at'
-        ]
-    
-    def get_content_preview(self, obj):
-        """Get a preview of SMS content"""
-        if hasattr(obj, 'content') and obj.content:
-            return obj.content[:100] + "..." if len(obj.content) > 100 else obj.content
-        elif hasattr(obj, 'template') and obj.template:
-            return obj.template.content[:100] + "..." if len(obj.template.content) > 100 else obj.template.content
-        return "No content"
-    
-    def get_recipient_count(self, obj):
-        """Get count of recipients"""
-        if hasattr(obj, 'to') and obj.to:
-            return len(obj.to) if isinstance(obj.to, list) else 1
-        return 0
+        model = SmsTariff
+        fields = ('id', 'title', 'price_per_segment', 'effective_from')

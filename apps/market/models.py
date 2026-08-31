@@ -687,6 +687,27 @@ class MarketMembership(BaseModel):
         (VIEWER, _('Viewer')),
     )
 
+    INVITED = 'invited'
+    PHONE_VERIFIED = 'phone_verified'
+    PROFILE_INCOMPLETE = 'profile_incomplete'
+    OWNER_REVIEW = 'owner_review'
+    ADMIN_REVIEW = 'admin_review'
+    ACTIVE = 'active'
+    NEEDS_EDITING = 'needs_editing'
+    REJECTED = 'rejected'
+    OWNER_DISABLED = 'owner_disabled'
+    STATUS_CHOICES = (
+        (INVITED, _('Invited')),
+        (PHONE_VERIFIED, _('Phone verified')),
+        (PROFILE_INCOMPLETE, _('Profile incomplete')),
+        (OWNER_REVIEW, _('Waiting for owner review')),
+        (ADMIN_REVIEW, _('Waiting for admin review')),
+        (ACTIVE, _('Active')),
+        (NEEDS_EDITING, _('Needs editing')),
+        (REJECTED, _('Rejected')),
+        (OWNER_DISABLED, _('Disabled by owner')),
+    )
+
     market = models.ForeignKey(
         Market,
         related_name='memberships',
@@ -699,6 +720,25 @@ class MarketMembership(BaseModel):
     )
     role = models.CharField(max_length=16, choices=ROLE_CHOICES, default=EDITOR)
     is_active = models.BooleanField(default=True)
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default=ACTIVE)
+    permissions = models.JSONField(default=list, blank=True)
+    invited_by = models.ForeignKey(
+        User,
+        related_name='sent_market_invitations',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    owner_approved_at = models.DateTimeField(null=True, blank=True)
+    admin_approved_at = models.DateTimeField(null=True, blank=True)
+    approved_by = models.ForeignKey(
+        User,
+        related_name='approved_market_memberships',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    review_note = models.TextField(blank=True, default='')
 
     class Meta:
         db_table = 'market_membership'
