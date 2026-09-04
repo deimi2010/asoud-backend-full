@@ -25,8 +25,8 @@ class CommentSerializer(serializers.ModelSerializer):
     def get_user(self, obj) -> str | None:
         return str(obj.creator_id) if obj.creator_id else None
 
-    def get_parent_id(self, obj):
-        return obj.parent_comment_id or obj.id
+    def get_parent_id(self, obj) -> str:
+        return str(obj.parent_comment_id or obj.id)
 
     def get_level(self, obj) -> int:
         return 1 if obj.parent_comment_id else 0
