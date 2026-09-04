@@ -8,13 +8,112 @@ from rest_framework.test import APIClient
 
 from apps.category.models import Category, Group, SubCategory
 from apps.market.models import (
-    Market, MarketBookmark, MarketContact, MarketLocation, MarketMembership, MarketRevision,
-    MarketSchedule, MarketTheme, MarketGatewayConnection,
+    BusinessCardProfile, BusinessCardTariff, Market, MarketBookmark, MarketContact,
+    MarketLocation, MarketMembership, MarketRevision, MarketSchedule, MarketTheme,
+    MarketGatewayConnection,
 )
 from apps.market.serializers.owner_serializers import MarketCreateSerializer
 from apps.region.models import City, Country, Province
 from apps.reserve.models import Service
 from apps.users.models import User
+
+
+class BusinessCardWorkflowTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user('09121110000', None)
+        group = Group.objects.create(title='Card group', market_fee=0)
+        category = Category.objects.create(
+            group=group, title='Card category', market_fee=0,
+        )
+        self.subcategory = SubCategory.objects.create(
+            category=category, title='Card subcategory', market_fee=0,
+        )
+        country = Country.objects.create(name='Iran card')
+        province = Province.objects.create(country=country, name='Tehran card')
+        self.city = City.objects.create(province=province, name='Tehran card')
+        self.client = APIClient()
+        self.client.force_authenticate(self.owner)
+
+    def payload(self):
+        return {
+            'type': Market.SHOP,
+            'business_id': 'my-card',
+            'name': 'My card',
+            'description': 'Shared description',
+            'national_code': '',
+            'sub_category': str(self.subcategory.id),
+            'slogan': 'Shared slogan',
+            'first_mobile_number': self.owner.mobile_number,
+            'email': 'owner@example.com',
+            'website_url': 'https://asoud.ir',
+            'messenger_ids': {'telegram': 'asoud'},
+            'city': str(self.city.id),
+            'address': 'Shared address',
+            'zip_code': '1234567890',
+            'latitude': '35.700000',
+            'longitude': '51.400000',
+        }
+
+    def test_card_create_and_edit_use_shared_market_data(self):
+        created = self.client.post(
+            '/api/v1/owner/business-card/', self.payload(), format='json',
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        card = BusinessCardProfile.objects.select_related('market').get(
+            id=created.data['data']['id'],
+        )
+        self.assertEqual(card.market.contact.email, 'owner@example.com')
+
+        updated = self.client.patch(
+            f'/api/v1/owner/business-card/{card.id}/',
+            {'name': 'Updated everywhere', 'telephone': '02112345678'},
+            format='json',
+        )
+        self.assertEqual(updated.status_code, 200, updated.data)
+        card.market.refresh_from_db()
+        self.assertEqual(card.market.name, 'Updated everywhere')
+        self.assertEqual(card.market.contact.telephone, '02112345678')
+
+    def test_publication_is_independent_from_store(self):
+        created = self.client.post(
+            '/api/v1/owner/business-card/', self.payload(), format='json',
+        )
+        card = BusinessCardProfile.objects.get(id=created.data['data']['id'])
+        card.is_paid = True
+        card.save(update_fields=['is_paid', 'updated_at'])
+        queued = self.client.post(
+            f'/api/v1/owner/business-card/{card.id}/queue/',
+        )
+        self.assertEqual(queued.status_code, 200, queued.data)
+        card.refresh_from_db()
+        card.market.refresh_from_db()
+        self.assertEqual(card.status, BusinessCardProfile.QUEUE)
+        self.assertEqual(card.market.status, Market.DRAFT)
+
+        card.status = BusinessCardProfile.PUBLISHED
+        card.save(update_fields=['status', 'updated_at'])
+        self.client.force_authenticate(user=None)
+        public = self.client.get('/api/v1/storefront/card/my-card')
+        self.assertEqual(public.status_code, 200, public.data)
+
+    def test_card_payment_amount_comes_from_active_tariff(self):
+        from django.test import RequestFactory
+        from apps.payment.serializers.user import PaymentCreateSerializer
+
+        created = self.client.post(
+            '/api/v1/owner/business-card/', self.payload(), format='json',
+        )
+        BusinessCardTariff.objects.create(amount='75000', duration_days=365)
+        request = RequestFactory().post('/payments/create/')
+        request.user = self.owner
+        serializer = PaymentCreateSerializer(data={
+            'target': 'business_card_subscription',
+            'target_id': created.data['data']['id'],
+            'gateway': 'zarinpal',
+            'amount': '1',
+        }, context={'request': request})
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('amount', serializer.errors)
 
 
 class MarketBusinessIdValidationTests(TestCase):

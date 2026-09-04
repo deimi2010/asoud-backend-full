@@ -357,6 +357,61 @@ class MarketContact(BaseModel):
         return self.market.name
 
 
+class BusinessCardProfile(BaseModel):
+    """Card-only lifecycle; identity and contact data stay on Market."""
+
+    DRAFT = 'draft'
+    QUEUE = 'queue'
+    PUBLISHED = 'published'
+    NEEDS_EDITING = 'needs_editing'
+    INACTIVE = 'inactive'
+    STATUS_CHOICES = (
+        (DRAFT, _('Draft')),
+        (QUEUE, _('In queue')),
+        (PUBLISHED, _('Published')),
+        (NEEDS_EDITING, _('Needs editing')),
+        (INACTIVE, _('Inactive')),
+    )
+
+    market = models.OneToOneField(
+        Market,
+        on_delete=models.CASCADE,
+        related_name='business_card',
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=DRAFT,
+        db_index=True,
+    )
+    status_reason = models.TextField(blank=True, default='')
+    is_paid = models.BooleanField(default=False)
+    subscription_start_date = models.DateTimeField(null=True, blank=True)
+    subscription_end_date = models.DateTimeField(null=True, blank=True)
+    subscription_days = models.PositiveIntegerField(default=365)
+
+    class Meta:
+        db_table = 'business_card_profile'
+        ordering = ('created_at', 'id')
+
+    def __str__(self):
+        return f'{self.market.name} business card'
+
+
+class BusinessCardTariff(BaseModel):
+    title = models.CharField(max_length=100, default='Business card subscription')
+    amount = models.DecimalField(max_digits=14, decimal_places=3)
+    duration_days = models.PositiveIntegerField(default=365)
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        db_table = 'business_card_tariff'
+        ordering = ('-created_at',)
+
+    def __str__(self):
+        return f'{self.title}: {self.amount}'
+
+
 class MarketSlider(BaseModel):
     market = models.ForeignKey(
         Market,

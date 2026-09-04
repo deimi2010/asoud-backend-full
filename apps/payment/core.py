@@ -18,7 +18,7 @@ from apps.cart.services import (
     reserve_order_inventory,
 )
 from apps.payment.models import Payment, Zarinpal
-from apps.market.models import Market
+from apps.market.models import BusinessCardProfile, BusinessCardTariff, Market
 from apps.users.models import User
 from apps.wallet.core import WalletCore
 from apps.affiliate.services import accrue_order_commissions
@@ -113,7 +113,7 @@ class PaymentCore:
         target = data.get('resolved_target')
         requested_amount = data.get('resolved_amount')
         if target is None or requested_amount is None or not isinstance(
-            target, (Wallet, Order, Market, Reservation)
+            target, (Wallet, Order, Market, Reservation, BusinessCardProfile)
         ):
             return False, 'Invalid payment target'
 
@@ -227,6 +227,40 @@ class PaymentCore:
                 is_valid, validation_error = validate_payment_amount(amount)
                 if not is_valid:
                     return False, validation_error
+            elif isinstance(target, BusinessCardProfile):
+                try:
+                    target = BusinessCardProfile.objects.select_for_update().get(
+                        id=target.id, market__user=user,
+                    )
+                except BusinessCardProfile.DoesNotExist:
+                    return False, 'Payable business card not found'
+                if target.is_paid and (
+                    target.subscription_end_date is None
+                    or target.subscription_end_date > timezone.now()
+                ):
+                    return False, 'Business card subscription is already active'
+                existing_payment = Payment.objects.filter(
+                    user=user,
+                    target_content_type=target_content_type,
+                    target_id=target.id,
+                    status=Payment.PENDING,
+                ).first()
+                if existing_payment is not None:
+                    existing_gateway = Zarinpal.objects.filter(payment=existing_payment).first()
+                    if existing_gateway and existing_gateway.authority:
+                        return True, existing_gateway
+                    return False, 'Existing payment session requires reconciliation'
+                tariff = BusinessCardTariff.objects.filter(is_active=True).first()
+                if tariff is None:
+                    return False, 'Business card subscription fee is not configured'
+                amount = Decimal(str(tariff.amount))
+                if amount != Decimal(str(requested_amount)):
+                    return False, 'Business card subscription fee changed; refresh before paying'
+                is_valid, validation_error = validate_payment_amount(amount)
+                if not is_valid:
+                    return False, validation_error
+                target.subscription_days = tariff.duration_days
+                target.save(update_fields=['subscription_days', 'updated_at'])
             elif isinstance(target, Market):
                 try:
                     target = Market.objects.select_for_update().get(
@@ -511,6 +545,21 @@ class PostPaymentCore:
             )
             market.is_paid = True
             market.save(update_fields=['is_paid', 'updated_at'])
+            return
+
+        if target_model is BusinessCardProfile:
+            card = BusinessCardProfile.objects.select_for_update().get(
+                id=payment.target_id,
+                market__user=self.user,
+            )
+            started_at = timezone.now()
+            extension_start = max(started_at, card.subscription_end_date or started_at)
+            card.is_paid = True
+            card.subscription_start_date = started_at
+            card.subscription_end_date = extension_start + timedelta(days=card.subscription_days)
+            card.save(update_fields=(
+                'is_paid', 'subscription_start_date', 'subscription_end_date', 'updated_at',
+            ))
             return
 
         if target_model is Reservation:

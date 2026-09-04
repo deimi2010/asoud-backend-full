@@ -1,4 +1,5 @@
 from django.urls import path
+from apps.market.views.business_card import PublicBusinessCardView
 from apps.flutter.views import (
     MarketDetailView,
     MarketProductThemesView,
@@ -15,6 +16,7 @@ from apps.flutter.views import (
 app_name = 'flutter_urls'
 
 urlpatterns = [
+    path('card/<str:business_id>', PublicBusinessCardView.as_view(), name='business-card'),
     path('markets', MarketDetailView.as_view(), name='market-detail'),
     path('markets/<uuid:pk>/like', MarketLikeView.as_view(), name='market-like'),
     path('markets/<uuid:pk>/bookmark', MarketBookmarkView.as_view(), name='market-bookmark'),

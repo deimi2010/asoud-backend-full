@@ -6,7 +6,7 @@ from apps.wallet.serializer import WalletSerializer
 from apps.advertise.models import Advertisement
 from apps.advertise.serializers import AdvertiseSerializer
 from apps.cart.models import Order
-from apps.market.models import Market
+from apps.market.models import BusinessCardProfile, BusinessCardTariff, Market
 from apps.reserve.models import Reservation
 from django.utils import timezone
 from decimal import Decimal
@@ -48,6 +48,9 @@ class PaymentSerializer(serializers.ModelSerializer):
         elif target_model == Reservation:
             return {'id': str(obj.target_id), 'tracking_code': obj.target.tracking_code}
 
+        elif target_model == BusinessCardProfile:
+            return {'id': str(obj.target_id), 'business_id': obj.target.market.business_id}
+
         return {'id': str(obj.target_id)}
 
     @extend_schema_field(serializers.CharField)
@@ -65,6 +68,9 @@ class PaymentSerializer(serializers.ModelSerializer):
 
         elif target_model == Reservation:
             return "reservation"
+
+        elif target_model == BusinessCardProfile:
+            return "business_card_subscription"
 
         return "unknown"
             
@@ -107,6 +113,9 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
         elif target_model == Reservation:
             return {'id': str(obj.target_id), 'tracking_code': obj.target.tracking_code}
 
+        elif target_model == BusinessCardProfile:
+            return {'id': str(obj.target_id), 'business_id': obj.target.market.business_id}
+
         return {'id': str(obj.target_id)}
     
     @extend_schema_field(serializers.DictField)
@@ -145,6 +154,9 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
         elif target_model == Reservation:
             return "reservation"
 
+        elif target_model == BusinessCardProfile:
+            return "business_card_subscription"
+
         return "unknown"
         
 class PaymentCreateSerializer(serializers.Serializer):
@@ -155,7 +167,10 @@ class PaymentCreateSerializer(serializers.Serializer):
         required=False,
     )
     target = serializers.ChoiceField(
-        choices=('wallet', 'order', 'market_subscription', 'reservation')
+        choices=(
+            'wallet', 'order', 'market_subscription', 'reservation',
+            'business_card_subscription',
+        )
     )
     target_id = serializers.UUIDField()
     gateway = serializers.ChoiceField(choices=('zarinpal',))
@@ -237,6 +252,36 @@ class PaymentCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError({'amount': 'Appointment has no payable amount.'})
             if attrs.get('amount') is not None and attrs['amount'] != resolved_amount:
                 raise serializers.ValidationError({'amount': 'Amount does not match the appointment fee.'})
+        elif attrs['target'] == 'business_card_subscription':
+            try:
+                target = BusinessCardProfile.objects.select_related('market').get(
+                    id=attrs['target_id'], market__user=user,
+                )
+            except BusinessCardProfile.DoesNotExist:
+                raise serializers.ValidationError(
+                    {'target_id': 'Payable business card not found.'}
+                )
+            if target.is_paid and (
+                target.subscription_end_date is None
+                or target.subscription_end_date > timezone.now()
+            ):
+                raise serializers.ValidationError(
+                    {'target_id': 'Business card subscription is already active.'}
+                )
+            if not hasattr(target.market, 'contact') or not hasattr(target.market, 'location'):
+                raise serializers.ValidationError(
+                    {'target_id': 'Business card information must be completed before payment.'}
+                )
+            tariff = BusinessCardTariff.objects.filter(is_active=True).first()
+            if tariff is None or tariff.amount <= 0:
+                raise serializers.ValidationError(
+                    {'target_id': 'Business card subscription fee is not configured.'}
+                )
+            resolved_amount = Decimal(str(tariff.amount))
+            if attrs.get('amount') is not None and attrs['amount'] != resolved_amount:
+                raise serializers.ValidationError(
+                    {'amount': 'Amount does not match the business card subscription fee.'}
+                )
         else:
             try:
                 target = Market.objects.select_related('sub_category').get(

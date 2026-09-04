@@ -28,6 +28,10 @@ urlpatterns = [
 
     # owner endpoints
     path('owner/market/', include('apps.market.urls.owner_urls')),
+    path(
+        'owner/business-card/',
+        include('apps.market.urls.business_card_urls'),
+    ),
     path('owner/product/', include('apps.product.urls.owner_urls')),
     path('owner/inquiries/', include('apps.price_inquiry.urls.owner')),
     path('owner/affiliate/', include('apps.affiliate.urls.owner')),

@@ -17,9 +17,44 @@ from .models import (
     MarketGatewayConnection,
     MarketShippingMethod,
     MarketMembership,
+    BusinessCardProfile,
+    BusinessCardTariff,
 )
 
 # Register your models here.
+
+
+@admin.register(BusinessCardProfile)
+class BusinessCardProfileAdmin(BaseAdmin):
+    list_display = ('market', 'status', 'is_paid', 'subscription_end_date')
+    list_filter = ('status', 'is_paid')
+    search_fields = ('market__name', 'market__business_id')
+    fields = (
+        'market', 'status', 'status_reason', 'is_paid',
+        'subscription_start_date', 'subscription_end_date', 'subscription_days',
+    ) + BaseAdmin.fields
+    actions = ('publish_cards', 'request_card_edits', 'deactivate_cards')
+
+    @admin.action(description='Publish selected paid business cards')
+    def publish_cards(self, request, queryset):
+        queryset.filter(is_paid=True).update(
+            status=BusinessCardProfile.PUBLISHED,
+            status_reason='',
+        )
+
+    @admin.action(description='Return selected business cards for editing')
+    def request_card_edits(self, request, queryset):
+        queryset.update(status=BusinessCardProfile.NEEDS_EDITING)
+
+    @admin.action(description='Deactivate selected business cards')
+    def deactivate_cards(self, request, queryset):
+        queryset.update(status=BusinessCardProfile.INACTIVE)
+
+
+@admin.register(BusinessCardTariff)
+class BusinessCardTariffAdmin(BaseAdmin):
+    list_display = ('title', 'amount', 'duration_days', 'is_active')
+    list_filter = ('is_active',)
 
 
 class MarketLocationTabularInline(BaseTabularInline):
