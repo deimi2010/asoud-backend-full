@@ -18,7 +18,32 @@ from apps.category.models import Category, Group, SubCategory
 from apps.market.models import Market, MarketMembership
 from apps.users.models import User
 from apps.core.firebase_app_check import FirebaseAppCheckMiddleware
+from apps.core.request_size import RequestSizeLimitMiddleware
 from config.security_settings import SecurityConfig
+
+
+class RequestSizeLimitMiddlewareTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.middleware = RequestSizeLimitMiddleware(
+            lambda request: SimpleNamespace(status_code=200)
+        )
+
+    @override_settings(ASOUD_MAX_REQUEST_BODY_BYTES=10)
+    def test_oversized_body_is_rejected_before_parsing(self):
+        request = self.factory.post(
+            '/api/v1/test/',
+            data=b'01234567890',
+            content_type='application/json',
+        )
+        self.assertEqual(self.middleware(request).status_code, 413)
+
+    @override_settings(ASOUD_MAX_REQUEST_BODY_BYTES=10)
+    def test_small_body_reaches_application(self):
+        request = self.factory.post(
+            '/api/v1/test/', data=b'{}', content_type='application/json'
+        )
+        self.assertEqual(self.middleware(request).status_code, 200)
 
 
 class FirebaseAppCheckMiddlewareTests(SimpleTestCase):

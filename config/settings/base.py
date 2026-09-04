@@ -131,6 +131,7 @@ MIDDLEWARE = [
     'django_prometheus.middleware.PrometheusBeforeMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'apps.core.request_size.RequestSizeLimitMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',  # Added for serving static files
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -302,6 +303,10 @@ ASOUD_RATE_LIMIT_FAIL_CLOSED_SCOPES = (
 )
 PAYMENT_SESSION_TTL_SECONDS = int(os.environ.get('PAYMENT_SESSION_TTL_SECONDS', 30 * 60))
 CHAT_GROUP_MAX_PARTICIPANTS = int(os.environ.get('CHAT_GROUP_MAX_PARTICIPANTS', 100))
+ASOUD_MAX_REQUEST_BODY_BYTES = int(
+    os.environ.get('ASOUD_MAX_REQUEST_BODY_BYTES', 10 * 1024 * 1024)
+)
+DATA_UPLOAD_MAX_MEMORY_SIZE = ASOUD_MAX_REQUEST_BODY_BYTES
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
