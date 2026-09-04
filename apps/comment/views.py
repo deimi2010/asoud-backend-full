@@ -2,14 +2,13 @@ from collections import defaultdict
 from uuid import UUID
 
 from django.contrib.contenttypes.models import ContentType
-from django.contrib.sites.shortcuts import get_current_site
 from django.db import models, transaction
-from django_comments_xtd.models import XtdComment
 from rest_framework import permissions, serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.comment.serializers import CommentSerializer, CommentUpdateSerializer
+from apps.comment.models import Comment
 from apps.market.models import Market
 from apps.product.models import Product
 
@@ -38,7 +37,7 @@ def _resolve_target(content_type, object_id):
 
 def _comment_target_is_public(comment):
     try:
-        _resolve_target(comment.content_type.model, comment.object_pk)
+        _resolve_target(comment.content_type.model, comment.object_id)
     except serializers.ValidationError:
         return False
     return True
@@ -58,32 +57,30 @@ class CommentView(APIView):
             data={'comment': request.data.get('comment')}
         )
         content_serializer.is_valid(raise_exception=True)
-        parent_id = request.data.get('parent_id') or 0
-        site_id = get_current_site(request).id
+        parent_id = request.data.get('parent_id')
+        parent = None
         if parent_id:
             try:
-                parent_id = int(parent_id)
-                XtdComment.objects.get(
+                parent_id = UUID(str(parent_id))
+                parent = Comment.objects.get(
                     id=parent_id,
                     content_type=content_type,
-                    object_pk=str(target.id),
-                    site_id=site_id,
-                    parent_id=models.F('id'),
+                    object_id=target.id,
+                    parent_comment__isnull=True,
                     is_public=True,
                     is_removed=False,
                 )
-            except (TypeError, ValueError, XtdComment.DoesNotExist):
+            except (TypeError, ValueError, Comment.DoesNotExist):
                 return Response(
                     {'error': 'Parent comment does not belong to this target'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        comment = XtdComment.objects.create(
+        comment = Comment.objects.create(
             content_type=content_type,
-            object_pk=str(target.id),
-            user=request.user,
-            comment=content_serializer.validated_data['comment'],
-            parent_id=parent_id,
-            site_id=site_id,
+            object_id=target.id,
+            creator=request.user,
+            content=content_serializer.validated_data['comment'],
+            parent_comment=parent,
         )
         return Response(
             {'message': 'Comment created', 'id': comment.id},
@@ -97,13 +94,12 @@ class CommentDetailView(APIView):
 
     def get(self, request, pk):
         try:
-            comment = XtdComment.objects.get(
+            comment = Comment.objects.get(
                 id=pk,
-                site_id=get_current_site(request).id,
                 is_public=True,
                 is_removed=False,
             )
-        except XtdComment.DoesNotExist:
+        except Comment.DoesNotExist:
             return Response({'error': 'Comment not found'}, status=status.HTTP_404_NOT_FOUND)
         if not _comment_target_is_public(comment):
             return Response({'error': 'Comment not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -118,31 +114,31 @@ class ContentCommentsView(APIView):
 
     def get(self, request, content_type, object_id):
         content_type_obj, target = _resolve_target(content_type, object_id)
-        site_id = get_current_site(request).id
-        visible = XtdComment.objects.filter(
+        visible = Comment.objects.filter(
             content_type=content_type_obj,
-            object_pk=str(target.id),
-            site_id=site_id,
+            object_id=target.id,
             is_public=True,
             is_removed=False,
         )
         root_ids = list(
-            visible.filter(parent_id=models.F('id'))
-            .order_by('-submit_date')
+            visible.filter(parent_comment__isnull=True)
+            .order_by('-created_at')
             .values_list('id', flat=True)[:PUBLIC_ROOT_LIMIT]
         )
         comments = list(
-            visible.filter(models.Q(id__in=root_ids) | models.Q(parent_id__in=root_ids))
-            .select_related('user', 'user__userprofile')
-            .order_by('submit_date')
+            visible.filter(
+                models.Q(id__in=root_ids) | models.Q(parent_comment_id__in=root_ids)
+            )
+            .select_related('creator', 'creator__userprofile')
+            .order_by('created_at')
         )
         roots = []
         children_by_parent = defaultdict(list)
         for comment in comments:
-            if comment.parent_id == comment.id:
+            if comment.parent_comment_id is None:
                 roots.append(comment)
             else:
-                children_by_parent[comment.parent_id].append(comment)
+                children_by_parent[comment.parent_comment_id].append(comment)
         return Response(
             CommentSerializer(
                 roots,
@@ -163,21 +159,20 @@ class CommentUpdateView(APIView):
     @transaction.atomic
     def put(self, request, pk):
         try:
-            comment = XtdComment.objects.select_for_update().get(
+            comment = Comment.objects.select_for_update().get(
                 id=pk,
-                user=request.user,
-                site_id=get_current_site(request).id,
+                creator=request.user,
                 is_public=True,
                 is_removed=False,
             )
-        except XtdComment.DoesNotExist:
+        except Comment.DoesNotExist:
             return Response({'error': 'Comment not found'}, status=status.HTTP_404_NOT_FOUND)
         if not _comment_target_is_public(comment):
             return Response({'error': 'Comment not found'}, status=status.HTTP_404_NOT_FOUND)
         serializer = CommentUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        comment.comment = serializer.validated_data['comment']
-        comment.save(update_fields=['comment'])
+        comment.content = serializer.validated_data['comment']
+        comment.save(update_fields=['content', 'updated_at'])
         return Response(
             CommentSerializer(comment, context={'depth': 1, 'request': request}).data
         )

@@ -34,6 +34,9 @@ class Comment(BaseModel):
         verbose_name=_('Content'),
     )
 
+    is_public = models.BooleanField(default=True)
+    is_removed = models.BooleanField(default=False)
+
     parent_comment = models.ForeignKey(
         'self',
         on_delete=models.CASCADE,
@@ -47,6 +50,15 @@ class Comment(BaseModel):
         db_table = 'comment'
         verbose_name = _('Comment')
         verbose_name_plural = _('Comments')
+        indexes = [
+            models.Index(
+                fields=[
+                    'content_type', 'object_id', 'is_public', 'is_removed',
+                    'parent_comment',
+                ],
+                name='comment_target_visible_idx',
+            ),
+        ]
 
     def __str__(self):
         return self.content

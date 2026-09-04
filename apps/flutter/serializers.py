@@ -1,6 +1,4 @@
 from django.contrib.contenttypes.models import ContentType
-from django.contrib.sites.shortcuts import get_current_site
-from django_comments_xtd.models import XtdComment
 from rest_framework import serializers
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_field
@@ -10,6 +8,7 @@ from apps.market.models import MarketReport
 from apps.market.serializers.user_serializers import ContactSerializer, LocationSerializer
 from apps.product.models import Product
 from apps.analytics.models import AnalyticsEvent
+from apps.comment.models import Comment
 from apps.information.models import VoiceGuide
 from apps.product.serializers.owner_serializers import (
     ProductDetailSerializer,
@@ -18,16 +17,12 @@ from apps.product.serializers.owner_serializers import (
 
 
 def _public_comment_count(obj, request):
-    site_id = get_current_site(request).id if request else None
-    filters = {
-        'content_type': ContentType.objects.get_for_model(obj),
-        'object_pk': str(obj.id),
-        'is_public': True,
-        'is_removed': False,
-    }
-    if site_id is not None:
-        filters['site_id'] = site_id
-    return XtdComment.objects.filter(**filters).count()
+    return Comment.objects.filter(
+        content_type=ContentType.objects.get_for_model(obj),
+        object_id=obj.id,
+        is_public=True,
+        is_removed=False,
+    ).count()
 
 
 class PublicProductDetailSerializer(ProductDetailSerializer):

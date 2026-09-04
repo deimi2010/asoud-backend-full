@@ -14,6 +14,8 @@ class CommentAdmin(BaseAdmin):
         'content_type',
         'creator',
         'content',
+        'is_public',
+        'is_removed',
         'parent_comment',
         'created_at',
     )
@@ -27,6 +29,8 @@ class CommentAdmin(BaseAdmin):
     # Add filters for easier searching
     list_filter = (
         'content_type',
+        'is_public',
+        'is_removed',
         'creator',
         'parent_comment',
     )

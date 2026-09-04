@@ -1,15 +1,13 @@
 from decimal import Decimal
 
-from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
-from django.contrib.sites.models import Site
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.db import connection
-from django_comments_xtd.models import XtdComment
 from rest_framework.test import APIClient
 
 from apps.category.models import Category, Group, SubCategory
+from apps.comment.models import Comment
 from apps.market.models import Market
 from apps.product.models import Product
 from apps.users.models import User
@@ -17,10 +15,6 @@ from apps.users.models import User
 
 class CommentIntegrityTests(TestCase):
     def setUp(self):
-        Site.objects.update_or_create(
-            id=settings.SITE_ID,
-            defaults={'domain': 'testserver', 'name': 'testserver'},
-        )
         self.user = User.objects.create_user('09126660001', None)
         self.other_user = User.objects.create_user('09126660002', None)
         self.owner = User.objects.create_user('09126660003', None)
@@ -56,14 +50,13 @@ class CommentIntegrityTests(TestCase):
             ship_cost_pay_type=Product.FREE,
         )
 
-    def create_comment(self, *, product=None, user=None, text='Root', parent_id=0):
-        return XtdComment.objects.create(
+    def create_comment(self, *, product=None, user=None, text='Root', parent=None):
+        return Comment.objects.create(
             content_type=ContentType.objects.get_for_model(Product),
-            object_pk=str((product or self.product).id),
-            site_id=settings.SITE_ID,
-            user=user or self.user,
-            comment=text,
-            parent_id=parent_id,
+            object_id=(product or self.product).id,
+            creator=user or self.user,
+            content=text,
+            parent_comment=parent,
         )
 
     def test_flutter_create_and_list_contract_returns_root_with_reply(self):
@@ -143,7 +136,7 @@ class CommentIntegrityTests(TestCase):
 
         self.assertEqual(unpublished.status_code, 400)
         self.assertEqual(unsupported.status_code, 400)
-        self.assertFalse(XtdComment.objects.exists())
+        self.assertFalse(Comment.objects.exists())
 
     def test_reply_parent_must_belong_to_same_target(self):
         parent = self.create_comment(product=self.other_product)
@@ -159,7 +152,7 @@ class CommentIntegrityTests(TestCase):
             format='json',
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(XtdComment.objects.count(), 1)
+        self.assertEqual(Comment.objects.count(), 1)
 
     def test_private_and_removed_comments_are_not_public(self):
         private = self.create_comment(text='Private')
@@ -194,9 +187,9 @@ class CommentIntegrityTests(TestCase):
         self.assertEqual(denied.status_code, 404)
         self.assertEqual(updated.status_code, 200)
         comment.refresh_from_db()
-        self.assertEqual(comment.comment, 'Edited')
-        self.assertEqual(comment.user, self.user)
-        self.assertEqual(comment.parent_id, comment.id)
+        self.assertEqual(comment.content, 'Edited')
+        self.assertEqual(comment.creator, self.user)
+        self.assertIsNone(comment.parent_comment_id)
 
         self.product.status = Product.DRAFT
         self.product.save(update_fields=['status', 'updated_at'])

@@ -94,8 +94,6 @@ INSTALLED_APPS = [
 
     # comment system
     'django.contrib.sites',
-    'django_comments_xtd',
-    'django_comments',
     
     # Monitoring & Metrics
     'django_prometheus',
@@ -421,11 +419,7 @@ else:
 
 
 # comments 
-COMMENTS_APP = 'django_comments_xtd'
 SITE_ID = 2
-COMMENTS_XTD_MAX_THREAD_LEVEL = 1
-COMMENTS_XTD_CONFIRM_EMAIL = False
-COMMENTS_XTD_LIST_ORDER = ('-thread_id', 'order')
 
 # CORS settings
 CORS_ALLOWED_ORIGINS = [
