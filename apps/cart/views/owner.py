@@ -21,8 +21,10 @@ from apps.cart.services import (
     release_order_inventory,
     reserve_order_inventory,
 )
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import serializers
 from apps.market.access import accessible_markets
+from apps.affiliate.services import accrue_order_commissions, reverse_order_commissions
 
 
 logger = logging.getLogger(__name__)
@@ -48,17 +50,17 @@ def _notify_order_status(user_id, order_id):
 
 def _is_exclusively_owned_order(order, user):
     item_markets = set()
-    for product_id, affiliate_id, product_market_id, affiliate_market_id in (
+    for product_id, affiliate_id, product_market_id, affiliate_source_market_id in (
         order.items.values_list(
             'product_id',
             'affiliate_id',
             'product__market_id',
-            'affiliate__market_id',
+            'affiliate__product__market_id',
         )
     ):
         if (product_id is None) == (affiliate_id is None):
             return False
-        item_markets.add(product_market_id or affiliate_market_id)
+        item_markets.add(product_market_id or affiliate_source_market_id)
     owner_markets = set(
         accessible_markets(user, write=True).values_list('id', flat=True)
     )
@@ -132,6 +134,7 @@ class OrderVerifyView(views.APIView):
                 )
             order.status = Order.COMPLETED
             order.is_paid = True
+            accrue_order_commissions(order)
         else:
             order.status = Order.VERIFIED
         
@@ -161,7 +164,7 @@ class OrderListView(views.APIView):
     def get(self, request):
         managed_markets = accessible_markets(request.user, write=True)
         owner_filter = Q(items__product__market__in=managed_markets) | Q(
-            items__affiliate__market__in=managed_markets
+            items__affiliate__product__market__in=managed_markets
         )
         market_owner_orders = Order.objects.exclude(status=Order.DRAFT).annotate(
             item_count=Count('items', distinct=True),
@@ -182,7 +185,8 @@ class OrderListView(views.APIView):
             'user'
         ).prefetch_related(
             'items__product__market',
-            'items__affiliate__market'
+            'items__affiliate__market',
+            'items__affiliate__product__market',
         ).distinct()
 
         serializer = OrderListSerializer(market_owner_orders, many=True)
@@ -195,6 +199,42 @@ class OrderListView(views.APIView):
             ),
             status=status.HTTP_200_OK
         )
+
+
+class OrderFulfillmentView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        request=inline_serializer(
+            name='OrderFulfillmentRequest',
+            fields={'status': serializers.ChoiceField(choices=(Order.PREPARING, Order.SHIPPED, Order.RETURNED))},
+        ),
+        responses={200: OrderSerializer},
+        tags=['Cart & Orders - Owner'],
+    )
+    @transaction.atomic
+    def put(self, request, pk):
+        try:
+            order = Order.objects.select_for_update().get(id=pk, is_paid=True)
+        except Order.DoesNotExist:
+            return Response({'detail': 'Paid order not found'}, status=404)
+        if not _is_exclusively_owned_order(order, request.user):
+            return Response({'detail': 'Permission denied'}, status=403)
+        desired = request.data.get('status')
+        allowed = {
+            Order.UNFULFILLED: {Order.PREPARING},
+            Order.PREPARING: {Order.SHIPPED},
+            Order.SHIPPED: {Order.RETURNED},
+            Order.DELIVERED: {Order.RETURNED},
+        }
+        if desired not in allowed.get(order.fulfillment_status, set()):
+            return Response({'detail': 'Invalid fulfillment transition'}, status=400)
+        order.fulfillment_status = desired
+        order.save(update_fields=('fulfillment_status', 'updated_at'))
+        if desired == Order.RETURNED:
+            reverse_order_commissions(order, 'Order returned')
+        transaction.on_commit(lambda: _notify_order_status(order.user_id, order.id))
+        return Response(OrderSerializer(order).data)
     
 class OrderDetailView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]

@@ -21,6 +21,7 @@ from apps.payment.models import Payment, Zarinpal
 from apps.market.models import Market
 from apps.users.models import User
 from apps.wallet.core import WalletCore
+from apps.affiliate.services import accrue_order_commissions
 from apps.wallet.models import Wallet
 from apps.reserve.models import Reservation
 from apps.reserve.lifecycle import notify_after_commit
@@ -597,6 +598,7 @@ class PostPaymentCore:
                 order.status = Order.COMPLETED
                 order.is_paid = True
                 order.save(update_fields=['status', 'is_paid', 'updated_at'])
+                accrue_order_commissions(order)
         except Order.DoesNotExist:
             return False, 'Payable order not found'
         except (InvalidOperation, TypeError, ValueError) as exc:
@@ -623,3 +625,4 @@ class PostPaymentCore:
         order.status = Order.COMPLETED
         order.is_paid = True
         order.save(update_fields=['status', 'is_paid', 'updated_at'])
+        accrue_order_commissions(order)

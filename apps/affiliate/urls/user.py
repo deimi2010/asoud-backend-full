@@ -7,15 +7,19 @@ from apps.affiliate.views.user import (
     AffiliateProductsListView,
     AffiliateProductDetailView,
     AffiliateProductUpdateView,
+    AffiliateProductSubmitView,
     AffiliateProductDeleteView,
     AffiliateProductThemeCreateAPIView,
     AffiliateProductThemeListAPIView,
     AffiliateProductThemeUpdateAPIView,
 )
+from apps.affiliate.views.finance import AffiliateFinanceView, AffiliatePayoutRequestView
 
 app_name = 'affiliate_user'
 
 urlpatterns = [
+    path('finance/', AffiliateFinanceView.as_view(), name='finance'),
+    path('finance/payout/', AffiliatePayoutRequestView.as_view(), name='payout'),
     path(
         'products/',
         ProductsForAffiliateListView.as_view(),
@@ -45,6 +49,11 @@ urlpatterns = [
         '<str:pk>/update/',
         AffiliateProductUpdateView.as_view(),
         name='update',
+    ),
+    path(
+        '<str:pk>/submit/',
+        AffiliateProductSubmitView.as_view(),
+        name='submit',
     ),
     path(
         '<str:pk>/delete/',

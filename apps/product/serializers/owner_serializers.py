@@ -193,6 +193,35 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         theme = attrs.get('theme')
         theme_index = attrs.get('theme_index')
 
+        if market is not None and market.sales_channel == market.AFFILIATE:
+            raise serializers.ValidationError({
+                'market': 'Affiliate stores can only add products from the affiliate bank.'
+            })
+
+        is_marketer = attrs.get(
+            'is_marketer', getattr(self.instance, 'is_marketer', False),
+        )
+        settlement_price = attrs.get(
+            'marketer_price', getattr(self.instance, 'marketer_price', None),
+        )
+        maximum_sell_price = attrs.get(
+            'maximum_sell_price',
+            getattr(self.instance, 'maximum_sell_price', None),
+        )
+        if is_marketer:
+            if settlement_price is None or maximum_sell_price is None:
+                raise serializers.ValidationError({
+                    'marketer_price': 'Seller settlement price is required.',
+                    'maximum_sell_price': 'Maximum affiliate sale price is required.',
+                })
+            if settlement_price <= 0 or maximum_sell_price < settlement_price:
+                raise serializers.ValidationError({
+                    'maximum_sell_price': (
+                        'Maximum sale price must be greater than or equal to the '
+                        'seller settlement price.'
+                    )
+                })
+
         discount_type = attrs.get('discount_type', 'none')
         if discount_type != 'none' and attrs.get('discount_percentage') is None:
             raise serializers.ValidationError({

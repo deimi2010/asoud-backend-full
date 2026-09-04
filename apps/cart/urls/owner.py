@@ -3,10 +3,12 @@ from apps.cart.views.owner import (
     OrderVerifyView,
     OrderListView,
     OrderDetailView,
+    OrderFulfillmentView,
 )
 app_name = 'owner_order'
 
 urlpatterns = [
+    path('<str:pk>/fulfillment', OrderFulfillmentView.as_view(), name='fulfillment'),
     path('verify',
          OrderVerifyView.as_view(),
          name='owner_order_verify'

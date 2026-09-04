@@ -3,7 +3,9 @@ from apps.affiliate.models import (
     AffiliateProduct,
     AffiliateProductImage,
     AffiliateProductTheme
+    , AffiliateCommission, AffiliatePayout
 )
+from django.utils import timezone
 # Register your models here.
 
 
@@ -69,5 +71,46 @@ class AffiliateProductThemeAdmin(BaseAdmin):
 admin.site.register(AffiliateProductTheme, AffiliateProductThemeAdmin)
 
 
+@admin.register(AffiliateCommission)
+class AffiliateCommissionAdmin(BaseAdmin):
+    list_display = ('order', 'marketer', 'seller', 'marketer_total', 'status', 'available_at')
+    list_filter = ('status',)
+    readonly_fields = (
+        'order', 'order_item', 'affiliate_product', 'seller', 'marketer',
+        'quantity', 'customer_total', 'seller_total', 'gross_commission',
+        'platform_fee', 'marketer_total',
+    ) + BaseAdmin.readonly_fields
+
+
+@admin.register(AffiliatePayout)
+class AffiliatePayoutAdmin(BaseAdmin):
+    list_display = ('marketer', 'role', 'amount', 'status', 'tracking_code', 'created_at')
+    list_filter = ('role', 'status')
+    filter_horizontal = ('commissions',)
+
+    def save_model(self, request, obj, form, change):
+        previous = AffiliatePayout.objects.filter(pk=obj.pk).values_list(
+            'status', flat=True,
+        ).first()
+        if obj.status == AffiliatePayout.PAID and previous != AffiliatePayout.PAID:
+            obj.paid_at = timezone.now()
+        super().save_model(request, obj, form, change)
+        if obj.status == AffiliatePayout.PAID:
+            if obj.role == AffiliatePayout.MARKETER_ROLE:
+                obj.commissions.filter(
+                    status=AffiliateCommission.AVAILABLE,
+                ).update(
+                    status=AffiliateCommission.PAID,
+                    paid_at=obj.paid_at,
+                    updated_at=timezone.now(),
+                )
+            else:
+                obj.commissions.filter(
+                    seller_status=AffiliateCommission.AVAILABLE,
+                ).update(
+                    seller_status=AffiliateCommission.PAID,
+                    seller_paid_at=obj.paid_at,
+                    updated_at=timezone.now(),
+                )
 
 

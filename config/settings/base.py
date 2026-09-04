@@ -346,6 +346,16 @@ SPECTACULAR_SETTINGS = {
     'SCHEMA_PATH_PREFIX': r'/api',
     'SWAGGER_UI_DIST': 'SIDECAR',
     'REDOC_DIST': 'SIDECAR',
+    'ENUM_NAME_OVERRIDES': {
+        'AffiliateCommissionStatusEnum':
+            'apps.affiliate.models.AffiliateCommission.STATUS_CHOICES',
+        'AffiliatePayoutStatusEnum':
+            'apps.affiliate.models.AffiliatePayout.STATUS_CHOICES',
+        'AffiliatePayoutRoleEnum':
+            'apps.affiliate.models.AffiliatePayout.ROLE_CHOICES',
+        'OrderFulfillmentStatusEnum':
+            'apps.cart.models.Order.FULFILLMENT_STATUS_CHOICES',
+    },
 }
 
 # (Removed duplicate LOGGING block; keeping the enhanced configuration above)

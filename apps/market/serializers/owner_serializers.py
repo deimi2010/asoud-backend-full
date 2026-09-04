@@ -34,6 +34,7 @@ class MarketCreateSerializer(serializers.ModelSerializer):
         model = Market
         fields = [
             'type',
+            'sales_channel',
             'business_id',
             'name',
             'description',
@@ -44,6 +45,13 @@ class MarketCreateSerializer(serializers.ModelSerializer):
 
 
 class MarketUpdateSerializer(MarketCreateSerializer):
+    def validate_sales_channel(self, value):
+        if self.instance is not None and value != self.instance.sales_channel:
+            raise serializers.ValidationError(
+                'Store sales channel cannot be changed after creation.'
+            )
+        return value
+
     def update(self, instance, validated_data):
         return super().update(instance, validated_data)
 
@@ -202,6 +210,7 @@ class MarketListSerializer(serializers.ModelSerializer):
         model = Market
         fields = [
             'id',
+            'sales_channel',
             'business_id',
             'name',
             'slogan',

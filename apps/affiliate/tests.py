@@ -1,13 +1,19 @@
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from apps.affiliate.models import AffiliateProduct, AffiliateProductTheme
+from apps.affiliate.models import (
+    AffiliateCommission, AffiliatePayout, AffiliateProduct, AffiliateProductTheme,
+)
+from apps.affiliate.services import (
+    accrue_order_commissions, release_due_commissions, schedule_order_commissions,
+)
+from apps.cart.models import Order
 from apps.category.models import Category, Group, SubCategory
 from apps.market.models import Market
 from apps.product.models import Product
-from apps.users.models import User
+from apps.users.models import User, UserProfile
 
 
 class AffiliateOwnershipTests(TestCase):
@@ -27,7 +33,9 @@ class AffiliateOwnershipTests(TestCase):
             title='Affiliate subcategory',
             market_fee=0,
         )
-        self.market = self.create_market(self.owner, 'AFF-1')
+        self.market = self.create_market(
+            self.owner, 'AFF-1', sales_channel=Market.AFFILIATE,
+        )
         self.source_market = self.create_market(self.source_owner, 'AFF-2')
         self.source_product = self.create_product(
             self.source_market,
@@ -41,7 +49,7 @@ class AffiliateOwnershipTests(TestCase):
         )
         self.client = APIClient()
 
-    def create_market(self, user, business_id):
+    def create_market(self, user, business_id, *, sales_channel=Market.SELLER):
         return Market.objects.create(
             user=user,
             type=Market.SHOP,
@@ -49,6 +57,7 @@ class AffiliateOwnershipTests(TestCase):
             business_id=business_id,
             name=business_id,
             sub_category=self.subcategory,
+            sales_channel=sales_channel,
         )
 
     def create_product(self, market, name, *, is_marketer):
@@ -64,6 +73,8 @@ class AffiliateOwnershipTests(TestCase):
             sell_type=Product.ONLINE,
             ship_cost_pay_type=Product.FREE,
             is_marketer=is_marketer,
+            marketer_price=Decimal('1000.000') if is_marketer else None,
+            maximum_sell_price=Decimal('1200.000') if is_marketer else None,
         )
 
     def payload(self, product=None, market=None):
@@ -227,3 +238,63 @@ class AffiliateOwnershipTests(TestCase):
 
         self.assertEqual(checkout.status_code, 400)
         self.assertEqual(blocked_add.status_code, 400)
+
+    @override_settings(AFFILIATE_RETURN_HOLD_DAYS=0)
+    def test_financial_ledger_is_idempotent_and_supports_both_parties(self):
+        affiliate = AffiliateProduct.objects.create(
+            market=self.market,
+            product=self.source_product,
+            type=self.source_product.type,
+            name='Commission listing',
+            sub_category=self.subcategory,
+            stock=10,
+            price=Decimal('1100.000'),
+            status=AffiliateProduct.PUBLISHED,
+            sell_type=AffiliateProduct.ONLINE,
+            ship_cost_pay_type=AffiliateProduct.FREE,
+        )
+        order = Order.objects.create(
+            user=self.buyer,
+            type=Order.ONLINE,
+            status=Order.COMPLETED,
+            is_paid=True,
+        )
+        order.items.create(
+            affiliate=affiliate,
+            quantity=2,
+            unit_price=Decimal('1100.000'),
+            source_market=self.source_market,
+            affiliate_market=self.market,
+            seller_settlement_unit_snapshot=Decimal('1000.000'),
+            affiliate_gross_unit_snapshot=Decimal('100.000'),
+            affiliate_platform_fee_unit_snapshot=Decimal('0'),
+        )
+
+        accrue_order_commissions(order)
+        accrue_order_commissions(order)
+        schedule_order_commissions(order)
+        release_due_commissions()
+
+        commission = AffiliateCommission.objects.get()
+        self.assertEqual(commission.marketer_total, Decimal('200.000'))
+        self.assertEqual(commission.seller_total, Decimal('2000.000'))
+        self.assertEqual(commission.status, AffiliateCommission.AVAILABLE)
+        self.assertEqual(commission.seller_status, AffiliateCommission.AVAILABLE)
+
+        UserProfile.objects.create(
+            user=self.owner,
+            national_code='0013547890',
+            iban_number='IR000000000000000000000000',
+            status=UserProfile.APPROVED,
+        )
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            '/api/v1/user/affiliate/finance/payout/',
+            {'amount': '200.000', 'role': AffiliatePayout.MARKETER_ROLE},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(AffiliatePayout.objects.filter(
+            marketer=self.owner,
+            role=AffiliatePayout.MARKETER_ROLE,
+        ).exists())

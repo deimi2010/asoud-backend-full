@@ -20,6 +20,7 @@ from apps.cart.serializers.user import(
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 from apps.users.models import User
 from apps.affiliate.models import AffiliateProduct
 from apps.product.models import Product
@@ -31,6 +32,7 @@ from apps.cart.services import (
 )
 from apps.analytics.models import AnalyticsEvent
 from apps.analytics.services import AnalyticsRecorder
+from apps.affiliate.services import schedule_order_commissions
 
 
 logger = logging.getLogger(__name__)
@@ -130,22 +132,27 @@ class CartViewSet(viewsets.ViewSet):
                 {'error': {'code': exc.code, 'detail': exc.detail}},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        existing_market_id = (
+        existing_item = (
             order.items.exclude(id=getattr(existing, 'id', None))
-            .values_list('product__market_id', 'affiliate__market_id')
+            .select_related('product', 'affiliate__product')
             .first()
         )
-        if existing_market_id:
-            market_id = existing_market_id[0] or existing_market_id[1]
-            if market_id != target.market_id:
+        target_source = target.product if affiliate else target
+        if existing_item:
+            existing_source = (
+                existing_item.product
+                if existing_item.product_id
+                else existing_item.affiliate.product
+            )
+            if existing_source.market_id != target_source.market_id:
                 return Response(
-                    {'error': 'All cart items must belong to one market'},
+                    {'error': 'All cart items must be fulfilled by one seller'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         new_quantity = quantity + (existing.quantity if existing else 0)
-        if new_quantity > target.stock:
+        if new_quantity > target_source.stock:
             return Response(
-                {'error': f'Insufficient stock. Available: {target.stock}'},
+                {'error': f'Insufficient stock. Available: {target_source.stock}'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if existing:
@@ -387,6 +394,28 @@ class OrderDetailView(views.APIView):
                 ),
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+class OrderDeliveryConfirmView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(request=None, responses={200: OrderSerializer}, tags=['Cart & Orders - User'])
+    @transaction.atomic
+    def post(self, request, pk):
+        try:
+            order = Order.objects.select_for_update().get(
+                id=pk,
+                user=request.user,
+                is_paid=True,
+                fulfillment_status=Order.SHIPPED,
+            )
+        except Order.DoesNotExist:
+            return Response({'detail': 'Shipped order not found'}, status=404)
+        order.fulfillment_status = Order.DELIVERED
+        order.delivered_at = timezone.now()
+        order.save(update_fields=('fulfillment_status', 'delivered_at', 'updated_at'))
+        schedule_order_commissions(order)
+        return Response(OrderSerializer(order).data)
+
 
 class OrderUpdateView(views.APIView):
     """

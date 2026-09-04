@@ -231,9 +231,15 @@ class CartIntegrityTests(TestCase):
         self.assertEqual(order.payable_amount, Decimal('2250.000'))
         self.assertEqual(order.shipping_method_name_snapshot, 'Courier')
 
-    def test_affiliate_store_shipping_uses_the_affiliate_market_method(self):
+    def test_affiliate_shipping_uses_the_source_seller_method(self):
         self.product.is_marketer = True
-        self.product.save(update_fields=['is_marketer', 'updated_at'])
+        self.product.ship_cost_pay_type = Product.STORE_SHIPPING
+        self.product.marketer_price = Decimal('1000.000')
+        self.product.maximum_sell_price = Decimal('1200.000')
+        self.product.save(update_fields=[
+            'is_marketer', 'marketer_price', 'maximum_sell_price',
+            'ship_cost_pay_type', 'updated_at',
+        ])
         affiliate = AffiliateProduct.objects.create(
             market=self.market,
             product=self.product,
@@ -572,6 +578,8 @@ class CartIntegrityTests(TestCase):
             )
 
     def test_affiliate_delete_requires_ownership_and_preserves_order_history(self):
+        self.market.sales_channel = Market.AFFILIATE
+        self.market.save(update_fields=['sales_channel', 'updated_at'])
         affiliate = AffiliateProduct.objects.create(
             market=self.market,
             product=self.product,

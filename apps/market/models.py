@@ -26,6 +26,13 @@ class Market(BaseModel):
         (SHOP, _("Shop")),
     )
 
+    SELLER = "seller"
+    AFFILIATE = "affiliate"
+    SALES_CHANNEL_CHOICES = (
+        (SELLER, _("Seller")),
+        (AFFILIATE, _("Affiliate marketer")),
+    )
+
     DRAFT = "draft"
     QUEUE = "queue"
     NOT_PUBLISHED = "not_published"
@@ -47,6 +54,14 @@ class Market(BaseModel):
         on_delete=models.CASCADE,
         related_name="markets",
         verbose_name=_('User'),
+    )
+
+    sales_channel = models.CharField(
+        max_length=12,
+        choices=SALES_CHANNEL_CHOICES,
+        default=SELLER,
+        db_index=True,
+        verbose_name=_("Sales channel"),
     )
 
     type = models.CharField(

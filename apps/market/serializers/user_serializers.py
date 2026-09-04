@@ -23,6 +23,7 @@ class MarketListSerializer(serializers.ModelSerializer):
         ref_name = 'PublicMarketList'
         fields = [
             'id',
+            'sales_channel',
             'business_id',
             'name',
             'sub_category',
@@ -117,6 +118,7 @@ class MarketDetailSerializer(serializers.ModelSerializer):
         model = Market
         fields = [
             'id',
+            'sales_channel',
             'business_id',
             'name',
             'sub_category',

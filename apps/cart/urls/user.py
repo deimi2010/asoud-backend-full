@@ -6,10 +6,12 @@ from apps.cart.views.user import (
     OrderUpdateView,
     OrderDeleteView,
     CartViewSet,
+    OrderDeliveryConfirmView,
 )
 app_name = 'user_order'
 
 urlpatterns = [
+    path('<str:pk>/delivery', OrderDeliveryConfirmView.as_view(), name='confirm_delivery'),
     path('create',
          OrderCreateView.as_view(),
          name='order_create'

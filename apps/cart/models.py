@@ -118,6 +118,19 @@ class Order(BaseModel):
         (FAILED, _("Failed")),
     )
 
+    UNFULFILLED = 'unfulfilled'
+    PREPARING = 'preparing'
+    SHIPPED = 'shipped'
+    DELIVERED = 'delivered'
+    RETURNED = 'returned'
+    FULFILLMENT_STATUS_CHOICES = (
+        (UNFULFILLED, _('Unfulfilled')),
+        (PREPARING, _('Preparing')),
+        (SHIPPED, _('Shipped')),
+        (DELIVERED, _('Delivered')),
+        (RETURNED, _('Returned')),
+    )
+
     INVENTORY_NONE = "none"
     INVENTORY_RESERVED = "reserved"
     INVENTORY_CONFIRMED = "confirmed"
@@ -186,6 +199,13 @@ class Order(BaseModel):
         choices=INVENTORY_STATUS_CHOICES,
         default=INVENTORY_NONE,
     )
+    fulfillment_status = models.CharField(
+        max_length=12,
+        choices=FULFILLMENT_STATUS_CHOICES,
+        default=UNFULFILLED,
+        db_index=True,
+    )
+    delivered_at = models.DateTimeField(blank=True, null=True)
     
     class Meta:
         ordering = ['-created_at']
@@ -273,6 +293,23 @@ class OrderItem(BaseModel):
     )
     product_discount_percentage_snapshot = models.PositiveSmallIntegerField(
         default=0,
+    )
+    source_market = models.ForeignKey(
+        'market.Market', null=True, blank=True, on_delete=models.PROTECT,
+        related_name='fulfilled_order_items',
+    )
+    affiliate_market = models.ForeignKey(
+        'market.Market', null=True, blank=True, on_delete=models.PROTECT,
+        related_name='attributed_order_items',
+    )
+    seller_settlement_unit_snapshot = models.DecimalField(
+        max_digits=14, decimal_places=3, null=True, blank=True,
+    )
+    affiliate_gross_unit_snapshot = models.DecimalField(
+        max_digits=14, decimal_places=3, null=True, blank=True,
+    )
+    affiliate_platform_fee_unit_snapshot = models.DecimalField(
+        max_digits=14, decimal_places=3, null=True, blank=True,
     )
 
     class Meta:

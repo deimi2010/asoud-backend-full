@@ -1,5 +1,6 @@
 from rest_framework import views, status, permissions
 from rest_framework.response import Response
+from drf_spectacular.utils import extend_schema
 from django.db import transaction
 from django.db.models.deletion import ProtectedError
 from utils.response import ApiResponse
@@ -9,6 +10,7 @@ from apps.product.serializers.owner_serializers import (
     ProductListSerializer
 )
 from apps.affiliate.serializers.user import (
+    AffiliateBankProductSerializer,
     AffiliateProductCreateSerializer,
     AffiliateProductDetailSerializer,
     AffiliateProductListSerializer,
@@ -20,17 +22,34 @@ from apps.affiliate.models import (
     AffiliateProductTheme
 )
 from apps.market.models import Market
+from apps.market.access import accessible_markets
+
+
+def _affiliate_markets(user, *, published=True):
+    markets = accessible_markets(user, write=True).filter(
+        sales_channel=Market.AFFILIATE,
+    )
+    return markets.filter(status=Market.PUBLISHED) if published else markets
 
 class ProductsForAffiliateListView(views.APIView):
     serializer_class = ProductListSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request):
+        if not _affiliate_markets(request.user).exists():
+            return Response(
+                ApiResponse(success=False, code=403, error='An approved affiliate store is required'),
+                status=status.HTTP_403_FORBIDDEN,
+            )
         products = Product.objects.filter(
             is_marketer=True, 
             status=Product.PUBLISHED,
             market__status=Market.PUBLISHED,
-        ).select_related('market', 'sub_category')
+            marketer_price__isnull=False,
+            maximum_sell_price__isnull=False,
+        ).exclude(market__user=request.user).select_related(
+            'market', 'sub_category',
+        ).prefetch_related('images')
 
         if price_lt := request.GET.get('price_lt'):
             products = products.filter(main_price__lte=price_lt)
@@ -45,7 +64,9 @@ class ProductsForAffiliateListView(views.APIView):
         if order_by in ['main_price', '-main_price', 'created_at', '-created_at']:
             products = products.order_by(order_by)
         
-        serializer = ProductListSerializer(products, many=True)
+        serializer = AffiliateBankProductSerializer(
+            products, many=True, context={'request': request},
+        )
 
         return Response(
             ApiResponse(
@@ -60,6 +81,11 @@ class AffiliateProductDetailBeforeCreateView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request, pk):
+        if not _affiliate_markets(request.user).exists():
+            return Response(
+                ApiResponse(success=False, code=403, error='An approved affiliate store is required'),
+                status=status.HTTP_403_FORBIDDEN,
+            )
         try:
             product = Product.objects.get(
                 id=pk,
@@ -77,7 +103,7 @@ class AffiliateProductDetailBeforeCreateView(views.APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         
-        serializer = ProductDetailSerializer(product)
+        serializer = AffiliateBankProductSerializer(product, context={'request': request})
 
         return Response(
             ApiResponse(
@@ -99,7 +125,7 @@ class AffiliateProductCreateView(views.APIView):
         try:
             market = Market.objects.select_for_update().get(
                 id=serializer.validated_data['market'].id,
-                user=request.user,
+                id__in=_affiliate_markets(request.user).values('id'),
                 status=Market.PUBLISHED,
             )
         except Market.DoesNotExist:
@@ -123,6 +149,11 @@ class AffiliateProductCreateView(views.APIView):
                 ),
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if product.market.user_id == request.user.id:
+            return Response(
+                ApiResponse(success=False, code=400, error='You cannot market your own product'),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if AffiliateProduct.objects.filter(market=market, product=product).exists():
             return Response(
                 ApiResponse(success=False, code=409, error="Affiliate product already exists"),
@@ -134,6 +165,12 @@ class AffiliateProductCreateView(views.APIView):
             product=product,
             type=product.type,
             sub_category=product.sub_category,
+            technical_detail=product.technical_detail,
+            stock=product.stock,
+            sell_type=product.sell_type,
+            ship_cost=None,
+            ship_cost_pay_type=product.ship_cost_pay_type,
+            is_requirement=product.is_requirement,
             status=AffiliateProduct.DRAFT,
         )
 
@@ -154,7 +191,7 @@ class AffiliateProductsListView(views.APIView):
     
     def get(self, request, pk):
         try:
-            market = Market.objects.get(id=pk, user=request.user)
+            market = _affiliate_markets(request.user, published=False).get(id=pk)
 
             products = AffiliateProduct.objects.filter(
                 market=market
@@ -186,7 +223,9 @@ class AffiliateProductDetailView(views.APIView):
     
     def get(self, request, pk):
         try:
-            product = AffiliateProduct.objects.get(id=pk, market__user=request.user)
+            product = AffiliateProduct.objects.get(
+                id=pk, market_id__in=_affiliate_markets(request.user, published=False).values('id')
+            )
         except AffiliateProduct.DoesNotExist:
             return Response(
                 ApiResponse(
@@ -216,7 +255,7 @@ class AffiliateProductUpdateView(views.APIView):
         try:
             product = AffiliateProduct.objects.select_for_update().get(
                 id=pk,
-                market__user=request.user,
+                market_id__in=_affiliate_markets(request.user, published=False).values('id'),
             )
         except AffiliateProduct.DoesNotExist:
             return Response(
@@ -247,7 +286,7 @@ class AffiliateProductUpdateView(views.APIView):
                 )
             serializer.validated_data.pop(field, None)
 
-        obj = serializer.save()
+        obj = serializer.save(status=AffiliateProduct.DRAFT)
         return Response(
             ApiResponse(
                 success=True,
@@ -255,6 +294,39 @@ class AffiliateProductUpdateView(views.APIView):
                 data=AffiliateProductDetailSerializer(obj).data,
             )
         )
+
+
+class AffiliateProductSubmitView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        request=None,
+        responses={200: AffiliateProductDetailSerializer},
+        tags=['Affiliate - User'],
+    )
+    @transaction.atomic
+    def post(self, request, pk):
+        try:
+            product = AffiliateProduct.objects.select_for_update().get(
+                id=pk,
+                market_id__in=_affiliate_markets(
+                    request.user, published=False,
+                ).values('id'),
+                status__in=(AffiliateProduct.DRAFT, AffiliateProduct.NEEDS_EDITING),
+            )
+        except AffiliateProduct.DoesNotExist:
+            return Response(
+                ApiResponse(success=False, code=404, error='Affiliate product not found'),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        product.status = AffiliateProduct.QUEUE
+        product.save(update_fields=('status', 'updated_at'))
+        return Response(ApiResponse(
+            success=True,
+            code=200,
+            data=AffiliateProductDetailSerializer(product).data,
+            message='Affiliate product submitted for review',
+        ))
 
 class AffiliateProductDeleteView(views.APIView):
     serializer_class = AffiliateProductDetailSerializer
@@ -265,7 +337,7 @@ class AffiliateProductDeleteView(views.APIView):
         try:
             product = AffiliateProduct.objects.select_for_update().get(
                 id=pk,
-                market__user=request.user,
+                market_id__in=_affiliate_markets(request.user, published=False).values('id'),
             )
             product.delete()
 
@@ -303,7 +375,10 @@ class AffiliateProductThemeCreateAPIView(views.APIView):
     @transaction.atomic
     def post(self, request, pk):
         try:
-            market = Market.objects.select_for_update().get(id=pk, user=request.user)
+            market = Market.objects.select_for_update().get(
+                id=pk,
+                id__in=_affiliate_markets(request.user, published=False).values('id'),
+            )
         except Market.DoesNotExist:
             return Response(
                 ApiResponse(
@@ -341,7 +416,7 @@ class AffiliateProductThemeListAPIView(views.APIView):
     
     def get(self, request, pk):
         try:
-            market = Market.objects.get(id=pk, user=request.user)
+            market = _affiliate_markets(request.user, published=False).get(id=pk)
         except Market.DoesNotExist:
             return Response(
                 ApiResponse(
@@ -378,7 +453,7 @@ class AffiliateProductThemeUpdateAPIView(views.APIView):
         try:
             product_theme = AffiliateProductTheme.objects.get(
                 id=pk,
-                market__user=request.user,
+                market_id__in=_affiliate_markets(request.user, published=False).values('id'),
             )
         except AffiliateProductTheme.DoesNotExist:
             return Response(

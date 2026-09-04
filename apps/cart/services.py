@@ -1,6 +1,7 @@
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 
+from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
@@ -24,8 +25,14 @@ class CartIntegrityError(ValueError):
 def _target_market_id(item):
     if (item.product_id is None) == (item.affiliate_id is None):
         return None
-    target = item.product or item.affiliate
-    return target.market_id if target else None
+    if item.product_id:
+        return item.product.market_id
+    return item.affiliate.product.market_id if item.affiliate_id else None
+
+
+def _inventory_target(item):
+    """The source seller always owns stock and fulfilment."""
+    return item.product if item.product_id else item.affiliate.product
 
 
 def _lock_order(order):
@@ -98,10 +105,20 @@ def validate_catalog_target(target):
                 'unavailable_item',
                 f'{target.name} is no longer available for affiliate marketing.',
             )
+        if (
+            source.marketer_price is None
+            or source.maximum_sell_price is None
+            or target.price < source.marketer_price
+            or target.price > source.maximum_sell_price
+        ):
+            raise CartIntegrityError(
+                'affiliate_price_invalid',
+                f'{target.name} is outside the seller approved price range.',
+            )
 
 
 def _item_requires_store_shipping(item):
-    target = item.product or item.affiliate
+    target = _inventory_target(item)
     return (
         target.type == Product.GOOD
         and target.sell_type != Product.PERSON
@@ -126,7 +143,6 @@ def _validate_items(items):
         )
 
     product_quantities = defaultdict(int)
-    affiliate_quantities = defaultdict(int)
     for item in items:
         if (item.product_id is None) == (item.affiliate_id is None):
             raise CartIntegrityError(
@@ -137,18 +153,13 @@ def _validate_items(items):
             raise CartIntegrityError('invalid_quantity', 'Item quantity must be positive.')
         target = item.product or item.affiliate
         validate_catalog_target(target)
-        if item.product_id:
-            product_quantities[item.product_id] += item.quantity
-        else:
-            affiliate_quantities[item.affiliate_id] += item.quantity
+        canonical_id = item.product_id or item.affiliate.product_id
+        product_quantities[canonical_id] += item.quantity
 
     for item in items:
-        target = item.product or item.affiliate
-        required = (
-            product_quantities[item.product_id]
-            if item.product_id
-            else affiliate_quantities[item.affiliate_id]
-        )
+        target = _inventory_target(item)
+        canonical_id = item.product_id or item.affiliate.product_id
+        required = product_quantities[canonical_id]
         if target.stock < required:
             raise CartIntegrityError(
                 'insufficient_stock',
@@ -385,6 +396,30 @@ def snapshot_order(order, discount_code='', shipping_method_id=None):
             Decimal(base_price) * (Decimal('100') - Decimal(applied_percentage))
             / Decimal('100')
         )
+        if item.affiliate_id:
+            settlement = _quantize(item.affiliate.product.marketer_price)
+            if item.unit_price < settlement:
+                raise CartIntegrityError(
+                    'affiliate_discount_invalid',
+                    'The discount would reduce the price below the seller settlement price.',
+                )
+            gross = _quantize(item.unit_price - settlement)
+            fee_percent = Decimal(
+                str(getattr(settings, 'AFFILIATE_PLATFORM_FEE_PERCENT', 0))
+            )
+            item.source_market_id = item.affiliate.product.market_id
+            item.affiliate_market_id = item.affiliate.market_id
+            item.seller_settlement_unit_snapshot = settlement
+            item.affiliate_gross_unit_snapshot = gross
+            item.affiliate_platform_fee_unit_snapshot = _quantize(
+                gross * fee_percent / Decimal('100')
+            )
+        else:
+            item.source_market_id = item.product.market_id
+            item.affiliate_market_id = None
+            item.seller_settlement_unit_snapshot = None
+            item.affiliate_gross_unit_snapshot = None
+            item.affiliate_platform_fee_unit_snapshot = None
         item.product_discount = automatic_discount if automatic_wins else None
         item.product_discount_percentage_snapshot = (
             automatic_percentage if automatic_wins else 0
@@ -393,6 +428,11 @@ def snapshot_order(order, discount_code='', shipping_method_id=None):
             'unit_price',
             'product_discount',
             'product_discount_percentage_snapshot',
+            'source_market',
+            'affiliate_market',
+            'seller_settlement_unit_snapshot',
+            'affiliate_gross_unit_snapshot',
+            'affiliate_platform_fee_unit_snapshot',
             'updated_at',
         ])
         subtotal += Decimal(base_price) * item.quantity
@@ -490,7 +530,7 @@ def reserve_order_inventory(order):
             product_discount.save(update_fields=['reserved', 'updated_at'])
 
     for item in items:
-        target = item.product or item.affiliate
+        target = _inventory_target(item)
         target.stock -= item.quantity
         target.save(update_fields=['stock', 'updated_at'])
 
@@ -506,7 +546,7 @@ def release_order_inventory(order, *, terminal=True):
         return order
     items = _locked_items(order)
     for item in items:
-        target = item.product or item.affiliate
+        target = _inventory_target(item)
         target.stock += item.quantity
         target.save(update_fields=['stock', 'updated_at'])
     if order.discount_id:

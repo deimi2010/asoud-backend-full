@@ -108,11 +108,13 @@ class MarketAdmin(BaseAdmin):
     list_display = [
         'name',
         'user',
+        'sales_channel',
     ]
 
     fields = (
         'user',
         'type',
+        'sales_channel',
         'status',
         'is_paid',
         'subscription_start_date',

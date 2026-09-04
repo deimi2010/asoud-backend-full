@@ -3,6 +3,9 @@ from django.utils.translation import gettext_lazy as _
 from apps.market.models import Market
 from apps.category.models import SubCategory
 from apps.product.models import ProductKeyword, Product
+from apps.users.models import User
+from django.core.validators import MinValueValidator
+from decimal import Decimal
 
 # Create your models here.
 
@@ -230,6 +233,12 @@ class AffiliateProduct(BaseModel):
         db_table = 'affiliate_product'
         verbose_name = _('Affiliate Product')
         verbose_name_plural = _('Affiliate Products')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('market', 'product'),
+                name='unique_affiliate_product_per_market',
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -256,3 +265,101 @@ class AffiliateProductImage(BaseModel):
     def __str__(self):
         return self.product.name
 
+
+class AffiliateCommission(BaseModel):
+    HELD = 'held'
+    AVAILABLE = 'available'
+    PAID = 'paid'
+    REVERSED = 'reversed'
+    STATUS_CHOICES = (
+        (HELD, _('Held')),
+        (AVAILABLE, _('Available')),
+        (PAID, _('Paid')),
+        (REVERSED, _('Reversed')),
+    )
+
+    order = models.ForeignKey(
+        'cart.Order', on_delete=models.PROTECT, related_name='affiliate_commissions',
+    )
+    order_item = models.OneToOneField(
+        'cart.OrderItem', on_delete=models.PROTECT,
+        related_name='affiliate_commission',
+    )
+    affiliate_product = models.ForeignKey(
+        AffiliateProduct, on_delete=models.PROTECT, related_name='commissions',
+    )
+    seller = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name='affiliate_sales',
+    )
+    marketer = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name='affiliate_earnings',
+    )
+    quantity = models.PositiveIntegerField()
+    customer_total = models.DecimalField(max_digits=14, decimal_places=3)
+    seller_total = models.DecimalField(max_digits=14, decimal_places=3)
+    gross_commission = models.DecimalField(max_digits=14, decimal_places=3)
+    platform_fee = models.DecimalField(
+        max_digits=14, decimal_places=3, default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    marketer_total = models.DecimalField(max_digits=14, decimal_places=3)
+    status = models.CharField(
+        max_length=12, choices=STATUS_CHOICES, default=HELD, db_index=True,
+    )
+    available_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    paid_at = models.DateTimeField(blank=True, null=True)
+    seller_status = models.CharField(
+        max_length=12, choices=STATUS_CHOICES, default=HELD, db_index=True,
+    )
+    seller_available_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    seller_paid_at = models.DateTimeField(blank=True, null=True)
+    reversal_reason = models.CharField(max_length=255, blank=True, default='')
+
+    class Meta:
+        ordering = ('-created_at',)
+        indexes = [
+            models.Index(fields=('marketer', 'status'), name='affiliate_earning_status_idx'),
+            models.Index(fields=('seller', 'status'), name='affiliate_sale_status_idx'),
+        ]
+
+
+class AffiliatePayout(BaseModel):
+    REQUESTED = 'requested'
+    APPROVED = 'approved'
+    PAID = 'paid'
+    REJECTED = 'rejected'
+    STATUS_CHOICES = (
+        (REQUESTED, _('Requested')),
+        (APPROVED, _('Approved')),
+        (PAID, _('Paid')),
+        (REJECTED, _('Rejected')),
+    )
+    MARKETER_ROLE = 'marketer'
+    SELLER_ROLE = 'seller'
+    ROLE_CHOICES = (
+        (MARKETER_ROLE, _('Marketer')),
+        (SELLER_ROLE, _('Seller')),
+    )
+
+    marketer = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name='affiliate_payouts',
+    )
+    commissions = models.ManyToManyField(
+        AffiliateCommission, related_name='payouts', blank=True,
+    )
+    amount = models.DecimalField(
+        max_digits=14, decimal_places=3,
+        validators=[MinValueValidator(Decimal('1'))],
+    )
+    status = models.CharField(
+        max_length=12, choices=STATUS_CHOICES, default=REQUESTED, db_index=True,
+    )
+    role = models.CharField(
+        max_length=10, choices=ROLE_CHOICES, default=MARKETER_ROLE,
+    )
+    tracking_code = models.CharField(max_length=100, blank=True, default='')
+    admin_note = models.TextField(blank=True, default='')
+    paid_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ('-created_at',)

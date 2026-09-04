@@ -4,10 +4,6 @@ from apps.cart.models import (
     Order,
     OrderItem
 )
-from apps.product.models import Product
-from apps.affiliate.models import AffiliateProduct
-
-
 class OrderItemSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
     class Meta:
@@ -36,7 +32,9 @@ class OrderListSerializer(serializers.ModelSerializer):
             'description', 
             'created_at', 
             'is_paid',
-            'total'
+            'total',
+            'status',
+            'fulfillment_status',
         ]
 
     @extend_schema_field(serializers.DecimalField(max_digits=14, decimal_places=3))
@@ -64,6 +62,8 @@ class OrderSerializer(serializers.ModelSerializer):
             'shipping_method_name_snapshot',
             'shipping_amount',
             'payable_amount',
+            'fulfillment_status',
+            'delivered_at',
             'items'
         ]
         read_only_fields = [

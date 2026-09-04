@@ -204,17 +204,19 @@ class Order2Serializer(serializers.ModelSerializer):
         return obj.total_items()
 
     def _target(self, item):
-        return item.product or item.affiliate
+        if item.product_id:
+            return item.product
+        return item.affiliate.product if item.affiliate_id else None
 
     @extend_schema_field(OpenApiTypes.UUID)
     def get_market_id(self, obj):
-        item = obj.items.select_related('product', 'affiliate').first()
+        item = obj.items.select_related('product', 'affiliate__product').first()
         target = self._target(item) if item else None
         return str(target.market_id) if target else None
 
     @extend_schema_field(OpenApiTypes.BOOL)
     def get_requires_shipping(self, obj):
-        for item in obj.items.select_related('product', 'affiliate'):
+        for item in obj.items.select_related('product', 'affiliate__product'):
             target = self._target(item)
             if (
                 target.type == Product.GOOD
@@ -351,6 +353,8 @@ class OrderSerializer(serializers.ModelSerializer):
             'shipping_method_name_snapshot',
             'shipping_amount',
             'inventory_status',
+            'fulfillment_status',
+            'delivered_at',
             'items'
         ]
         read_only_fields = [
